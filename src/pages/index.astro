@@ -21,6 +21,18 @@ import "../styles/styles.css";
     <meta property="og:image" content="./card.png" />
     <meta name="twitter:card" content="summary_large_image" />
 
+    <!--
+      The UI sprites are pixel art, so the canvas text is set in a pixel face
+      to match; system sans-serif beside them read as two different games.
+      main.ts waits for it to load before drawing, because a canvas falls back
+      silently and the miss is invisible.
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap"
+    />
   </head>
   <body>
     <header>
@@ -29,7 +41,7 @@ import "../styles/styles.css";
       </nav>
     </header>
     <main>
-      <h1>DesertBird</h1>
+      <h1 class="visually-hidden">DesertBird</h1>
       <canvas id="game-canvas" width="800" height="600">
         This game needs a browser that can draw to an HTML canvas.
       </canvas>

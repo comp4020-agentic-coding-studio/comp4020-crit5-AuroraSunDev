@@ -1,5 +1,41 @@
 import { asset } from "./paths.js";
 
+// The sprites are pixel art, so the text is too. A pixel face is far wider per
+// character than a system sans, so these sizes are much smaller than the ones
+// they replace and still read larger on screen.
+export const PIXEL_FONT = '"Press Start 2P", ui-monospace, monospace';
+
+export function font(size) {
+  return `${size}px ${PIXEL_FONT}`;
+}
+
+// Ensures the face is actually available before anything is drawn: a canvas
+// substitutes a fallback silently, so a missed load looks like a design choice
+// rather than a bug.
+export async function loadFont() {
+  if (!document.fonts) {
+    return;
+  }
+  try {
+    await Promise.all([
+      document.fonts.load(font(11)),
+      document.fonts.load(font(46)),
+    ]);
+  } catch {
+    // A missing face is a cosmetic loss, not a reason to withhold the game.
+  }
+}
+
+// Draws text centred on centerX. Measured rather than offset by hand, so the
+// labels stay centred whatever the string or the face turns out to be.
+export function centerText(ctx, text, centerX, y) {
+  const x = Math.round(centerX - ctx.measureText(text).width / 2);
+  ctx.fillText(text, x, y);
+  if (ctx.lineWidth > 0) {
+    ctx.strokeText(text, x, y);
+  }
+}
+
 // Shared screen furniture. The home screen and the end screens both draw the
 // play icon, so it lives here rather than in either of them.
 export const playButtonImg = new Image();

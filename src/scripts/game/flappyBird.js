@@ -5,9 +5,11 @@ import { Bird } from "./sprites/bird.js";
 import { Enemy } from "./sprites/enemy.js";
 import { Obstacle } from "./sprites/obstacle.js";
 import {
+  centerText,
   drawDigits,
   drawPlayButton,
   GAME_OVER_RECT,
+  font,
   gameOverImg,
   RESTART_RECT,
 } from "./ui.js";
@@ -201,12 +203,11 @@ export class FlappyBird {
   ShowBullet() {
     const ctx = state.ctx;
     ctx.save();
-    ctx.strokeStyle = "#000";
-    ctx.lineWidth = 1;
+    ctx.font = font(12);
+    ctx.fillStyle = "rgba(60,40,20,0.55)";
+    ctx.fillText("AMMO " + this.bulletLimitCount, 28, 111);
     ctx.fillStyle = "#fff";
-    ctx.font = "35px sans-serif";
-    ctx.fillText("Ammo: " + this.bulletLimitCount, 24, 95);
-    ctx.strokeText("Ammo: " + this.bulletLimitCount, 24, 95);
+    ctx.fillText("AMMO " + this.bulletLimitCount, 27, 110);
     ctx.restore();
   }
 
@@ -261,7 +262,7 @@ export class FlappyBird {
   }
 
   ShowScore() {
-    drawDigits(state.ctx, this.score, 24, 20, 2);
+    drawDigits(state.ctx, this.score, 26, 22, 3);
   }
 
   // Collision detection: the bird against the ceiling, the floor, every enemy
@@ -325,15 +326,13 @@ export class FlappyBird {
     winSound.play();
     // No asset was supplied for this one, so it stays as drawn text. "You Win"
     // is a status word, not an instruction.
-    const x = this.mapWidth / 2 - 140;
-    const y = this.mapHeight / 2 - 20;
     ctx.save();
-    ctx.strokeStyle = "#DC143C";
-    ctx.lineWidth = 0.25;
+    ctx.font = font(34);
+    ctx.lineWidth = 0;
+    ctx.fillStyle = "rgba(70,35,15,0.4)";
+    centerText(ctx, "YOU WIN", this.mapWidth / 2 + 3, 263);
     ctx.fillStyle = "#fff";
-    ctx.font = "900 oblique 90px sans-serif";
-    ctx.fillText("You Win", x, y);
-    ctx.strokeText("You Win", x, y);
+    centerText(ctx, "YOU WIN", this.mapWidth / 2, 260);
     ctx.restore();
     drawPlayButton(ctx, RESTART_RECT);
   }

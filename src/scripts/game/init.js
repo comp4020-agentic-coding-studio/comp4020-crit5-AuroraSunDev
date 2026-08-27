@@ -5,7 +5,9 @@ import { setCanvas, state } from "./state.js";
 import { Bullet } from "./sprites/bullet.js";
 import {
   breathe,
+  centerText,
   drawPlayButton,
+  font,
   hits,
   HOME_PLAY_RECT,
   READY_RECT,
@@ -304,12 +306,14 @@ function DrawBG_Title() {
 function DrawTitle() {
   const ctx = state.ctx;
   ctx.save();
-  ctx.strokeStyle = "rgb(160,82,45)";
-  ctx.lineWidth = 0.5;
+  ctx.font = font(46);
+  // A soft drop shadow instead of an outline: at pixel-font weights a stroke
+  // fills in the counters and the word turns to mush.
+  ctx.fillStyle = "rgba(70,35,15,0.35)";
+  centerText(ctx, "DesertBird", 403, 133);
   ctx.fillStyle = "#fff";
-  ctx.font = "900 oblique 120px sans-serif";
-  ctx.fillText("DesertBird", 145, 140);
-  ctx.strokeText("DesertBird", 145, 140);
+  ctx.lineWidth = 0;
+  centerText(ctx, "DesertBird", 400, 130);
   ctx.restore();
 }
 
@@ -353,59 +357,36 @@ function DrawSelect() {
     "Target " + levels[3].num[0].scoreC);
 }
 
+// Every label is centred on the tile by measurement rather than by a
+// hand-tuned x offset, so nothing drifts when a string or the face changes.
 function DrawGameLevel(i, img, x, y, levelStr, difficultyStr, scoreStr) {
   const ctx = state.ctx;
+  const mid = x + 64; // tiles are 128 wide
+
+  ctx.save();
+  ctx.lineWidth = 0;
 
   // Cleared marker.
-  ctx.save();
-  ctx.strokeStyle = "#000";
-  ctx.lineWidth = 0.25;
-  ctx.fillStyle = "#D2691E";
-  ctx.font = "30px sans-serif";
-  const clearedStr = FindLocal(i) ? "Cleared" : "Not cleared";
-  ctx.fillText(clearedStr, x + 25, y - 10);
-  ctx.strokeText(clearedStr, x + 25, y - 10);
-  ctx.restore();
+  ctx.font = font(10);
+  ctx.fillStyle = FindLocal(i) ? "#3f7d20" : "rgba(90,60,40,0.75)";
+  centerText(ctx, FindLocal(i) ? "CLEARED" : "NOT YET", mid, y - 14);
 
-  // Tile background.
-  ctx.save();
+  // Tile background and the level's bird.
   ctx.drawImage(levelBGImg, x, y);
-  ctx.restore();
-
-  // The level's bird.
-  ctx.save();
   ctx.drawImage(img, 0, 0, (img.width / 3) * 2, img.height,
     x + 20, y + 20, 128 - 40, 128 - 40);
-  ctx.restore();
 
   // Level name.
-  ctx.save();
-  ctx.strokeStyle = "#000";
-  ctx.lineWidth = 0.25;
-  ctx.fillStyle = "#8B4513";
-  ctx.font = "35px sans-serif";
-  ctx.fillText(levelStr, x + 5, y + 160);
-  ctx.strokeText(levelStr, x + 5, y + 160);
-  ctx.restore();
+  ctx.font = font(15);
+  ctx.fillStyle = "#6b3410";
+  centerText(ctx, levelStr, mid, y + 162);
 
-  // Difficulty.
-  ctx.save();
-  ctx.strokeStyle = "#000";
-  ctx.lineWidth = 0.25;
-  ctx.fillStyle = "#D2691E";
-  ctx.font = "30px sans-serif";
-  ctx.fillText(difficultyStr, x + 30, y + 200);
-  ctx.strokeText(difficultyStr, x + 30, y + 200);
-  ctx.restore();
+  // Difficulty and target score.
+  ctx.font = font(11);
+  ctx.fillStyle = "#9c5a24";
+  centerText(ctx, difficultyStr, mid, y + 192);
+  centerText(ctx, scoreStr, mid, y + 214);
 
-  // Target score.
-  ctx.save();
-  ctx.strokeStyle = "#000";
-  ctx.lineWidth = 0.25;
-  ctx.fillStyle = "#D2691E";
-  ctx.font = "30px sans-serif";
-  ctx.fillText(scoreStr, x - 5, y + 230);
-  ctx.strokeText(scoreStr, x - 5, y + 230);
   ctx.restore();
 }
 
