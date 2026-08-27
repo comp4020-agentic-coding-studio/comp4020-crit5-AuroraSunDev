@@ -1,4 +1,5 @@
 import { asset } from "./paths.js";
+import { rectsOverlap } from "./rules.js";
 import { state } from "./state.js";
 import { Bird } from "./sprites/bird.js";
 import { Enemy } from "./sprites/enemy.js";
@@ -285,54 +286,26 @@ FlappyBird.prototype = {
   },
 
   // Collision detection: the bird against the ceiling, the floor, every enemy
-  // and every obstacle.
+  // and every obstacle. The rectangle test lives in rules.js — see the note
+  // there on why the four-corner version it replaces let the bird fly through
+  // the middle of a cactus.
   CanMove: function () {
     if (this.bird.y < 0 || this.bird.y > this.mapHeight - this.bird.height) {
       this.gameOver = true;
       return;
     }
 
-    const boundary = [
-      { x: this.bird.x, y: this.bird.y },
-      { x: this.bird.x + this.bird.width, y: this.bird.y },
-      { x: this.bird.x, y: this.bird.y + this.bird.height },
-      {
-        x: this.bird.x + this.bird.width,
-        y: this.bird.y + this.bird.height,
-      },
-    ];
-
     for (let w = 0; w < this.enemyList.length; w++) {
-      for (let q = 0; q < 4; q++) {
-        if (
-          boundary[q].x >= this.enemyList[w].x &&
-          boundary[q].x <= this.enemyList[w].x + this.enemyList[w].width &&
-          boundary[q].y >= this.enemyList[w].y &&
-          boundary[q].y <= this.enemyList[w].y + this.enemyList[w].height
-        ) {
-          this.gameOver = true;
-          break;
-        }
-      }
-      if (this.gameOver) {
-        break;
+      if (rectsOverlap(this.bird, this.enemyList[w])) {
+        this.gameOver = true;
+        return;
       }
     }
 
     for (let i = 0; i < this.obsList.length; i++) {
-      for (let j = 0; j < 4; j++) {
-        if (
-          boundary[j].x >= this.obsList[i].x &&
-          boundary[j].x <= this.obsList[i].x + this.obsList[i].width &&
-          boundary[j].y >= this.obsList[i].y &&
-          boundary[j].y <= this.obsList[i].y + this.obsList[i].height
-        ) {
-          this.gameOver = true;
-          break;
-        }
-      }
-      if (this.gameOver) {
-        break;
+      if (rectsOverlap(this.bird, this.obsList[i])) {
+        this.gameOver = true;
+        return;
       }
     }
   },
