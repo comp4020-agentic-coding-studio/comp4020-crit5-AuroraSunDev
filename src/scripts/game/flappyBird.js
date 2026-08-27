@@ -1,7 +1,8 @@
 import { asset } from "./paths.js";
-import { rectsOverlap } from "./rules.js";
+import { enemyInFiringLine, rectsOverlap } from "./rules.js";
 import { state } from "./state.js";
 import { Bird } from "./sprites/bird.js";
+import { Bullet } from "./sprites/bullet.js";
 import { Enemy } from "./sprites/enemy.js";
 import { Obstacle } from "./sprites/obstacle.js";
 import {
@@ -14,11 +15,10 @@ import {
   RESTART_RECT,
 } from "./ui.js";
 
-// Sound effects. bulletSound is exported because the keyboard handler in
-// init.js fires it at the moment a shot is created.
+// Sound effects.
 const attackSound = new Audio(asset("audio/attack.mp3"));
 attackSound.volume = 0.8;
-export const bulletSound = new Audio(asset("audio/bullet.mp3"));
+const bulletSound = new Audio(asset("audio/bullet.mp3"));
 bulletSound.volume = 0.8;
 const winSound = new Audio(asset("audio/win.mp3"));
 winSound.volume = 0.7;
@@ -70,6 +70,7 @@ export class FlappyBird {
     this.obsInterval = 6000; // ms between obstacle pairs
 
     this.bulletSpeed = 10;
+    this.fireRange = 420; // how far ahead auto-fire will engage
 
     this.level = 100; // ground height
   }
@@ -188,6 +189,47 @@ export class FlappyBird {
         this.enemyList[i].draw(state.ctx);
       }
     }
+  }
+
+  // Shooting happens on its own when an enemy lines up ahead of the bird.
+  // It used to be the A key, which the home screen explained in a block of
+  // text the brief forbids. Removing the text left a control nobody could
+  // discover and that a touch device cannot press at all, which also made the
+  // easter-egg level unreachable. Firing is now something the game does for
+  // you: the ammo count is the only thing the player has to read, and it
+  // reads as a number going down.
+  AutoFire() {
+    if (
+      this.bulletLimitCount <= 0 || // out of ammo
+      this.bulletList.length > 0 || // one shot in flight at a time
+      this.bird == null ||
+      this.bullet == null ||
+      !this.bullet.complete
+    ) {
+      return;
+    }
+
+    const muzzleX = this.bird.x + this.bird.width;
+    const muzzleY = this.bird.y + this.bird.height / 2;
+    const shot = {
+      x: muzzleX,
+      y: muzzleY,
+      width: this.bullet.width,
+      height: this.bullet.height,
+    };
+
+    // The decision itself lives in rules.js, where it can be tested without a
+    // canvas: it fires within a frame or two of a level starting, which is
+    // far too fast to catch reliably by driving a browser.
+    if (!enemyInFiringLine(shot, this.enemyList, this.fireRange)) {
+      return;
+    }
+
+    this.bulletList.push(new Bullet(muzzleX, muzzleY, this.bullet));
+    this.bulletLimitCount -= 1;
+    this.spaceTouch = true;
+    bulletSound.currentTime = 0;
+    bulletSound.play();
   }
 
   DrawBullet(step) {

@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { rectsOverlap } from "../src/scripts/game/rules.js";
+import {
+  enemyInFiringLine,
+  rectsOverlap,
+} from "../src/scripts/game/rules.js";
 
 // A contract test for this week's brief: "one rule carries a focused
 // automated test". It retires with the brief, per spec/README.md.
@@ -87,5 +90,54 @@ describe("rectsOverlap", () => {
     const cactus = rect(100, 190, 200, 300);
     expect(rectsOverlap(bird, cactus)).toBe(true);
     expect(anyCornerInside(bird, cactus)).toBe(true);
+  });
+});
+
+// The bird shoots by itself, so this rule is the entire firing decision.
+// Testing it here rather than by driving a browser is deliberate: the first
+// shot of a level happens within a frame or two of the level starting, which
+// is faster than a screenshot loop can reliably observe — an earlier attempt
+// to catch it that way reported "no auto-fire" while the screenshot in the
+// same run plainly showed the ammo count had dropped.
+describe("enemyInFiringLine", () => {
+  const shot = rect(424, 292, 20, 12);
+  const RANGE = 420;
+  const enemy = (x: number, y: number): Rect => rect(x, y, 40, 40);
+
+  it("fires at an enemy ahead, in range and level", () => {
+    expect(enemyInFiringLine(shot, [enemy(600, 280)], RANGE)).toBe(true);
+  });
+
+  it("holds fire when the enemy is behind the bird", () => {
+    expect(enemyInFiringLine(shot, [enemy(200, 280)], RANGE)).toBe(false);
+  });
+
+  it("holds fire when the enemy is beyond range", () => {
+    expect(enemyInFiringLine(shot, [enemy(900, 280)], RANGE)).toBe(false);
+  });
+
+  it("holds fire when the enemy is above or below the shot's line", () => {
+    expect(enemyInFiringLine(shot, [enemy(600, 100)], RANGE)).toBe(false);
+    expect(enemyInFiringLine(shot, [enemy(600, 500)], RANGE)).toBe(false);
+  });
+
+  it("holds fire at an enemy already defeated", () => {
+    const dead = { ...enemy(600, 280), defeat: true };
+    expect(enemyInFiringLine(shot, [dead], RANGE)).toBe(false);
+  });
+
+  it("holds fire when there is nothing to shoot at", () => {
+    expect(enemyInFiringLine(shot, [], RANGE)).toBe(false);
+  });
+
+  it("fires if any one of several enemies qualifies", () => {
+    const enemies = [enemy(200, 280), enemy(900, 280), enemy(600, 285)];
+    expect(enemyInFiringLine(shot, enemies, RANGE)).toBe(true);
+  });
+
+  it("does not waste a round on an enemy grazing the line by nothing", () => {
+    // Enemy's bottom edge exactly meets the shot's top edge: no overlap, so
+    // the shot would pass under it and the round would be gone for nothing.
+    expect(enemyInFiringLine(shot, [enemy(600, 252)], RANGE)).toBe(false);
   });
 });

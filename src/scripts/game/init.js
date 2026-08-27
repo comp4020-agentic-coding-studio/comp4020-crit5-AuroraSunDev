@@ -1,8 +1,7 @@
-import { bulletSound, FlappyBird } from "./flappyBird.js";
+import { FlappyBird } from "./flappyBird.js";
 import { levels } from "./levels.js";
 import { asset } from "./paths.js";
 import { setCanvas, state } from "./state.js";
-import { Bullet } from "./sprites/bullet.js";
 import {
   breathe,
   centerText,
@@ -92,7 +91,6 @@ export function initGame(canvas) {
   canvas.addEventListener("touchcancel", PointerUp, { passive: true });
 
   window.addEventListener("keypress", HandleKeyPress, false);
-  window.addEventListener("keydown", HandleKeyDown, false);
 }
 
 // Press and release drive the bird: held means climb, released means fall.
@@ -198,6 +196,7 @@ function RunGame(speed) {
     if (game.enemyLimitCount >= 0) {
       game.DrawEnemy(step);
     }
+    game.AutoFire();
     game.CheckTouch(step);
     game.CountScore();
     game.ShowScore();
@@ -401,27 +400,6 @@ function SaveLocal(i, flag) {
 // would have shown a level as cleared when it wasn't.
 function FindLocal(i) {
   return localStorage.getItem(String(i)) === "true";
-}
-
-function HandleKeyDown(e) {
-  if (e.keyCode == "65") {
-    // A fires. Creating the bullet here puts it at the bird's beak.
-    if (game.bulletLimitCount > 0) {
-      game.spaceTouch = true;
-      // Only one shot at a time: wait for the last one to be destroyed.
-      if (game.bulletList[0] == null) {
-        const bullet1 = new Bullet(
-          game.bird.x + game.bird.width,
-          game.bird.y + game.bird.height / 2,
-          game.bullet,
-        );
-        game.bulletList.push(bullet1);
-        game.bulletLimitCount -= 1;
-        bulletSound.currentTime = 0;
-        bulletSound.play();
-      }
-    }
-  }
 }
 
 function HandleKeyPress(e) {

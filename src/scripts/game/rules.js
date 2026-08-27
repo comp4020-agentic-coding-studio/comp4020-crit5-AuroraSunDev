@@ -20,3 +20,22 @@ export function rectsOverlap(a, b) {
     a.y + a.height > b.y
   );
 }
+
+// Is any enemy worth spending a round on? The bird fires by itself, so this
+// is the whole of the decision: there is no player to blame for a wasted shot,
+// and ammo is finite, so firing at something unhittable is a bug rather than
+// a miss.
+//
+// A shot only ever travels right, at a fixed height, so an enemy qualifies
+// only if it is ahead of the muzzle, inside `range`, and already vertically
+// level with the shot. `shot` and each enemy are {x, y, width, height}.
+export function enemyInFiringLine(shot, enemies, range) {
+  return enemies.some(
+    (enemy) =>
+      !enemy.defeat &&
+      enemy.x > shot.x &&
+      enemy.x - shot.x < range &&
+      shot.y < enemy.y + enemy.height &&
+      shot.y + shot.height > enemy.y,
+  );
+}
