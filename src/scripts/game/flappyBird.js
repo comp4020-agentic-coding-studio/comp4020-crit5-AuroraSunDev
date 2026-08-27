@@ -22,52 +22,57 @@ winSound.volume = 0.7;
 const overSound = new Audio(asset("audio/over.mp3"));
 overSound.volume = 0.7;
 
-export function FlappyBird() {}
+// The three arrays below used to sit on the prototype, where they would be
+// shared by every FlappyBird ever created — harmless while there is exactly
+// one, and a confusing bug the moment there isn't.
+export class FlappyBird {
+  constructor() {
+    this.bird = null;
+    this.bg = null;
 
-FlappyBird.prototype = {
-  bird: null,
-  bg: null,
+    this.obs = null;
+    this.obsList = [];
 
-  obs: null,
-  obsList: [],
+    this.bullet = null;
+    this.bulletList = [];
 
-  bullet: null,
-  bulletList: [],
+    this.enemy = null;
+    this.enemyList = [];
+    this.enemyCount = 0; // obstacles seen since the last enemy was spawned
 
-  enemy: null,
-  enemyList: [],
-  enemyCount: 0, // obstacles seen since the last enemy was spawned
+    this.score = 0;
+    this.touch = false; // pointer is held down
+    this.spaceTouch = false; // a shot is in flight
+    this.gameOver = false;
+    this.gameWin = false;
 
-  mapWidth: 800,
-  mapHeight: 600,
+    // Set per level from the level table.
+    this.bulletLimitCount = 0;
+    this.enemyLimitCount = 0;
+    this.enemyIntervalCount = 0;
+    this.scoreLimitCount = 0;
 
-  startX: 360, // the bird never moves horizontally
-  startY: 260,
+    // Tuning constants.
+    this.mapWidth = 800;
+    this.mapHeight = 600;
 
-  obsDistance: 200, // the gap between an obstacle pair
-  obsSpeed: 2, // how fast obstacles travel left, i.e. how fast the bird flies
-  upSpeed: 8,
-  downSpeed: 3,
+    this.startX = 360; // the bird never moves horizontally
+    this.startY = 260;
 
-  obsInterval: 6000, // ms between obstacle pairs
+    this.obsDistance = 200; // the gap between an obstacle pair
+    this.obsSpeed = 2; // obstacle travel speed, i.e. how fast the bird flies
+    this.upSpeed = 8;
+    this.downSpeed = 3;
 
-  bulletSpeed: 10,
+    this.obsInterval = 6000; // ms between obstacle pairs
 
-  level: 100, // ground height
-  score: 0,
-  touch: false, // pointer is held down
-  spaceTouch: false, // a shot is in flight
-  gameOver: false,
-  gameWin: false,
+    this.bulletSpeed = 10;
 
-  // Set per level from the level table.
-  bulletLimitCount: 0,
-  enemyLimitCount: 0,
-  enemyIntervalCount: 0,
-  scoreLimitCount: 0,
+    this.level = 100; // ground height
+  }
 
   // Load this level's images and lay out the opening screen.
-  CreateMap: function () {
+  CreateMap() {
     // Arriving in the easter-egg level carries the score across; any other
     // level starts from zero.
     if (
@@ -122,10 +127,10 @@ FlappyBird.prototype = {
       }.bind(this);
       this.enemy.src = asset("img/enemy.png");
     }
-  },
+  }
 
   // Spawn the next obstacle pair, and an enemy every enemyIntervalCount pairs.
-  CreateObs: function () {
+  CreateObs() {
     const h = Math.floor(
       Math.random() * (this.mapHeight - this.obsDistance - this.level) + 10,
     );
@@ -155,20 +160,20 @@ FlappyBird.prototype = {
         this.enemyList.splice(0, 1);
       }
     }
-  },
+  }
 
   // `step` is how much of one original tick this frame covers; every speed
   // below is per-tick, so multiplying keeps the game's pace independent of
   // the refresh rate.
-  DrawObs: function (step) {
+  DrawObs(step) {
     for (let i = 0; i < this.obsList.length; i++) {
       this.obsList[i].x -= this.obsSpeed * step;
       // The list alternates hanging, standing, hanging, standing.
       this.obsList[i].draw(state.ctx, i % 2 ? "up" : "down");
     }
-  },
+  }
 
-  DrawEnemy: function (step) {
+  DrawEnemy(step) {
     for (let i = 0; i < this.enemyList.length; i++) {
       if (!this.enemyList[i].defeat) {
         this.enemyList[i].x -= this.obsSpeed * step;
@@ -180,9 +185,9 @@ FlappyBird.prototype = {
         this.enemyList[i].draw(state.ctx);
       }
     }
-  },
+  }
 
-  DrawBullet: function (step) {
+  DrawBullet(step) {
     this.bulletList[0].draw(state.ctx);
     this.bulletList[0].x += this.bulletSpeed * step;
     // Drop it once it leaves the screen, which frees the next shot.
@@ -190,9 +195,9 @@ FlappyBird.prototype = {
       this.bulletList.splice(0, 1);
       this.spaceTouch = false;
     }
-  },
+  }
 
-  ShowBullet: function () {
+  ShowBullet() {
     const ctx = state.ctx;
     ctx.save();
     ctx.strokeStyle = "#000";
@@ -202,9 +207,9 @@ FlappyBird.prototype = {
     ctx.fillText("Ammo: " + this.bulletLimitCount, 20, 105);
     ctx.strokeText("Ammo: " + this.bulletLimitCount, 20, 105);
     ctx.restore();
-  },
+  }
 
-  CountScore: function () {
+  CountScore() {
     // Obstacles that leave the screen are destroyed, so at most two pairs are
     // ever to the left of the bird — checking the first and third is enough.
     if (
@@ -223,62 +228,38 @@ FlappyBird.prototype = {
       this.obsList[2].flypast = true;
     }
 
-    // A bullet that reaches an enemy destroys it and scores a point.
-    if (this.spaceTouch) {
-      const boundary2 = [
-        { x: this.bulletList[0].x, y: this.bulletList[0].y },
-        {
-          x: this.bulletList[0].x + this.bulletList[0].width,
-          y: this.bulletList[0].y,
-        },
-        {
-          x: this.bulletList[0].x,
-          y: this.bulletList[0].y + this.bulletList[0].height,
-        },
-        {
-          x: this.bulletList[0].x + this.bulletList[0].width,
-          y: this.bulletList[0].y + this.bulletList[0].height,
-        },
-      ];
-      for (let e = 0; e < this.enemyList.length; e++) {
-        for (let r = 0; r < 4; r++) {
-          if (
-            boundary2[r].x >= this.enemyList[e].x &&
-            boundary2[r].x <= this.enemyList[e].x + this.enemyList[e].width &&
-            boundary2[r].y >= this.enemyList[e].y &&
-            boundary2[r].y <= this.enemyList[e].y + this.enemyList[e].height
-          ) {
-            this.score += 1;
-            this.enemyList[e].defeat = true;
-            this.enemyList.splice(e, 1);
-            this.bulletList.splice(0, 1);
-            this.spaceTouch = false;
-            attackSound.currentTime = 0;
-            attackSound.play();
-            state.jumpEnemyCount--;
-            break;
-          } else if (
-            // The shot went past this enemy: retire it.
-            !this.enemyList[e].defeat &&
-            boundary2[0].x >= this.enemyList[e].x + this.enemyList[e].width
-          ) {
-            this.enemyList[e].defeat = false;
-            this.bulletList.splice(0, 1);
-            this.spaceTouch = false;
-          }
-        }
-        if (this.gameOver) {
-          break;
-        }
+    // A bullet that reaches an enemy destroys it and scores a point. Same
+    // rectangle test as the bird's collisions — this was the last copy of the
+    // four-corner version, and it had the same blind spot.
+    const bullet = this.bulletList[0];
+    if (this.spaceTouch && bullet != null) {
+      const hit = this.enemyList.findIndex((enemy) =>
+        rectsOverlap(bullet, enemy),
+      );
+      if (hit !== -1) {
+        this.score += 1;
+        this.enemyList.splice(hit, 1);
+        this.bulletList.splice(0, 1);
+        this.spaceTouch = false;
+        attackSound.currentTime = 0;
+        attackSound.play();
+        state.jumpEnemyCount--;
+      } else if (
+        // The shot has travelled past an enemy without connecting: retire it
+        // so the player gets their next round back.
+        this.enemyList.some((enemy) => bullet.x >= enemy.x + enemy.width)
+      ) {
+        this.bulletList.splice(0, 1);
+        this.spaceTouch = false;
       }
     }
 
     if (this.score === this.scoreLimitCount) {
       this.gameWin = true;
     }
-  },
+  }
 
-  ShowScore: function () {
+  ShowScore() {
     const ctx = state.ctx;
     ctx.save();
     ctx.strokeStyle = "#000";
@@ -288,13 +269,13 @@ FlappyBird.prototype = {
     ctx.fillText("Score: " + this.score, 20, 50);
     ctx.strokeText("Score: " + this.score, 20, 50);
     ctx.restore();
-  },
+  }
 
   // Collision detection: the bird against the ceiling, the floor, every enemy
   // and every obstacle. The rectangle test lives in rules.js — see the note
   // there on why the four-corner version it replaces let the bird fly through
   // the middle of a cactus.
-  CanMove: function () {
+  CanMove() {
     if (this.bird.y < 0 || this.bird.y > this.mapHeight - this.bird.height) {
       this.gameOver = true;
       return;
@@ -313,10 +294,10 @@ FlappyBird.prototype = {
         return;
       }
     }
-  },
+  }
 
   // Apply the pointer state to the bird and draw it.
-  CheckTouch: function (step) {
+  CheckTouch(step) {
     if (this.touch) {
       this.bird.y -= this.upSpeed * step;
       this.bird.draw(state.ctx, this.spaceTouch ? "attack" : "up");
@@ -327,25 +308,25 @@ FlappyBird.prototype = {
     if (this.spaceTouch) {
       this.DrawBullet(step);
     }
-  },
+  }
 
   // Redrawing the background is what clears the previous frame.
-  ClearScreen: function () {
+  ClearScreen() {
     state.ctx.drawImage(this.bg, 0, 0);
-  },
+  }
 
   // Both end screens show the play icon again rather than naming a key. It is
   // the same control the player already used to start, so it needs no caption.
-  ShowOver: function () {
+  ShowOver() {
     const ctx = state.ctx;
     overSound.currentTime = 0;
     overSound.play();
     ctx.drawImage(gameOverImg, GAME_OVER_RECT.x, GAME_OVER_RECT.y,
       GAME_OVER_RECT.width, GAME_OVER_RECT.height);
     drawPlayButton(ctx, RESTART_RECT);
-  },
+  }
 
-  ShowWin: function () {
+  ShowWin() {
     const ctx = state.ctx;
     winSound.currentTime = 0;
     winSound.play();
@@ -362,5 +343,5 @@ FlappyBird.prototype = {
     ctx.strokeText("You Win", x, y);
     ctx.restore();
     drawPlayButton(ctx, RESTART_RECT);
-  },
-};
+  }
+}

@@ -30,11 +30,9 @@ const levelXY = [
   { x: 0, y: 0 },
 ];
 
-// Where a level jump lands, when the easter egg fires.
-let jumpStage;
-
 const game = new FlappyBird();
-let BLC;
+// Whether this level issues ammo at all, and so whether to draw the count.
+let levelHasAmmo = false;
 let Speed; // ms between frames, per level
 
 export function initGame(canvas) {
@@ -137,7 +135,7 @@ function InitScript(stage) {
   game.enemyIntervalCount = stage.num[0].enemyIC; // obstacles between enemies
   game.scoreLimitCount = stage.num[0].scoreC; // score that wins the level
 
-  BLC = stage.num[0].enemyC;
+  levelHasAmmo = stage.num[0].bulletC > 0;
   Speed = stage.IntervalSpeed[0].ITVSpeed;
 }
 
@@ -204,7 +202,7 @@ function RunGame(speed) {
 
     CheckJump(state.curStage);
 
-    if (BLC != 0) {
+    if (levelHasAmmo) {
       game.ShowBullet();
     }
 
@@ -238,7 +236,7 @@ function CheckJump(cStage) {
     if (cStage.jump[0].to === 4 || cStage.jump[0].to === 3) {
       state.score3JumpTemp = game.score;
     }
-    jumpStage = levels[cStage.jump[0].to];
+    const jumpStage = levels[cStage.jump[0].to];
     state.curIndex = cStage.jump[0].to;
     InitScript(jumpStage);
     state.curStage = jumpStage;
