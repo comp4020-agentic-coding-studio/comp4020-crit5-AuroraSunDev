@@ -51,6 +51,117 @@ export function rectHitsMask(rect, mask) {
   return false;
 }
 
+// No trick, and no amount of progress, takes a pair's gap below this. The
+// bird is 48px tall in levels 2-4 and 64 in level 1, so a gap this size is
+// threadable but leaves nothing to drift with.
+export const GAP_FLOOR = 130;
+
+// A quantity that tightens as a run goes on and then holds. The gap inside an
+// obstacle pair and the distance between consecutive pairs both move this way,
+// so they share one rule: linear in the score, clamped at a floor.
+//
+// Progress is counted in points rather than seconds. A point is the unit the
+// player can see — the number at the top of the screen — and a pure function
+// of the score is testable without a clock, which a function of elapsed time
+// is not.
+export function tighten(base, perPoint, progress, floor) {
+  return Math.max(floor, base - Math.max(0, progress) * perPoint);
+}
+
+// The same shape upward, for the things that get more common rather than
+// tighter: how often the endless run springs a gap shut, how often it narrows
+// one from the start.
+export function climb(base, perPoint, progress, ceiling) {
+  return Math.min(ceiling, base + Math.max(0, progress) * perPoint);
+}
+
+export function pairGap(pacing, progress) {
+  return tighten(pacing.gap, pacing.gapPerPoint, progress, pacing.minGap);
+}
+
+export function pairSpacing(pacing, progress) {
+  return tighten(
+    pacing.spacing,
+    pacing.spacingPerPoint,
+    progress,
+    pacing.minSpacing,
+  );
+}
+
+// A trick shortens a gap by `by`, but never past the floor.
+export function shortenGap(gap, by) {
+  return Math.max(GAP_FLOOR, gap - by);
+}
+
+// How long to wait before spawning the next pair, for a spacing given in
+// pixels. Spacing is authored in pixels because pixels are what the player
+// reads: held at a fixed 6000ms, a faster level quietly spread its obstacles
+// *further* apart — level 3 ran 580px between pairs where level 1 ran 400.
+export function pairIntervalMs(spacingPx, obsSpeed, tickMs) {
+  return (spacingPx * tickMs) / obsSpeed;
+}
+
+// How far through its closure a snapping pair is, 0 to 1.
+//
+// It holds the height it spawned with until its leading edge is
+// `triggerAhead` px in front of the bird's nose, and then shuts over `travel`
+// px. The version this replaces eased the gap closed across the whole
+// approach — 340px of travel for 20px of change — which is a real difference
+// nobody can perceive happening. A change has to be sudden to be an event,
+// and it has to finish with open runway left or it is not a hazard the player
+// can answer, just one they are told about too late.
+export function snapProgress(pairX, noseX, triggerAhead, travel) {
+  const travelled = noseX + triggerAhead - pairX;
+  if (travelled <= 0) {
+    return 0;
+  }
+  return Math.min(1, travelled / travel);
+}
+
+// The endless run has no end, so its tricks cannot be planned as a list of
+// pair indices the way a level's are. They are rolled per pair against a
+// chance that climbs with the score.
+export function snapChance(pacing, progress) {
+  return climb(
+    pacing.snapChance,
+    pacing.snapChancePerPoint,
+    progress,
+    pacing.maxSnapChance,
+  );
+}
+
+export function narrowChance(pacing, progress) {
+  return climb(
+    pacing.narrowChance,
+    pacing.narrowChancePerPoint,
+    progress,
+    pacing.maxNarrowChance,
+  );
+}
+
+// Obstacles between one enemy and the next, closing up as the run goes on.
+export function enemyInterval(pacing, progress) {
+  return Math.round(
+    tighten(
+      pacing.enemyInterval,
+      pacing.enemyIntervalPerPoint,
+      progress,
+      pacing.minEnemyInterval,
+    ),
+  );
+}
+
+// How wide a window of pair indices a level's tricks may be planned into.
+//
+// A point comes from flying past a pair *or* from shooting an enemy, so a
+// level with enemies reaches its target in fewer pairs than the target
+// suggests. Planning against `targetScore + 3` was why a run could finish
+// having played no trick at all: level 1 picked its single narrow gap from
+// indices 2..9 while only five pairs ever spawned.
+export function trickSpan(targetScore, enemyCount, firstRandom) {
+  return Math.max(2, targetScore - enemyCount - firstRandom);
+}
+
 // Which obstacle pairs get a difficulty trick played on them.
 //
 // Picks `count` distinct pair indices from the `span` pairs starting at

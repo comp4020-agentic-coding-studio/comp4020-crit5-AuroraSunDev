@@ -1,10 +1,19 @@
 import { asset } from "./paths.js";
 import {
   enemyInFiringLine,
+  enemyInterval,
+  narrowChance,
   nextPairTrick,
+  pairGap,
+  pairIntervalMs,
+  pairSpacing,
   pickPairIndices,
   rectHitsMask,
   rectsOverlap,
+  shortenGap,
+  snapChance,
+  snapProgress,
+  trickSpan,
 } from "./rules.js";
 import { state } from "./state.js";
 import { Bird } from "./sprites/bird.js";
@@ -12,8 +21,12 @@ import { Bullet } from "./sprites/bullet.js";
 import { Enemy } from "./sprites/enemy.js";
 import { Obstacle } from "./sprites/obstacle.js";
 import {
+  CHOICE_HOME_RECT,
+  CHOICE_PLAY_RECT,
   centerText,
   drawDigits,
+  drawDigitsCentered,
+  drawHomeButton,
   drawPlayButton,
   GAME_OVER_RECT,
   font,
@@ -68,32 +81,66 @@ export class FlappyBird {
     this.startX = 360; // the bird never moves horizontally
     this.startY = 260;
 
-    this.obsDistance = 200; // the gap between an obstacle pair
     this.obsSpeed = 2; // obstacle travel speed, i.e. how fast the bird flies
     this.upSpeed = 8;
     this.downSpeed = 3;
-
-    this.obsInterval = 6000; // ms between obstacle pairs
 
     this.bulletSpeed = 10;
     this.fireRange = 420; // how far ahead auto-fire will engage
 
     this.level = 100; // ground height
 
-    // Difficulty pacing, replaced per level from the table's `pacing` block.
-    this.narrowBy = 20;
+    // How a pair springs shut. The gap does not ease closed over the whole
+    // approach any more: at 20px spread across 340px of travel the change was
+    // real and nobody saw it happen. It now holds its spawn height until the
+    // pair is `snapTriggerAhead` in front of the bird's nose and then closes
+    // over `snapTravel` px — about half a second, fast enough to read as an
+    // event, with roughly two seconds of open runway left to react in.
+    this.snapTriggerAhead = 180;
+    this.snapTravel = 45;
+
+    // The active pacing block, replaced per level from the table and by the
+    // endless block when level 3's win screen resumes instead of stopping.
+    this.pacing = null;
+    this.endless = false;
+    // Score at which the current pacing started counting, so the endless run
+    // can carry level 3's 15 points without starting at its own late curve.
+    this.progressBase = 0;
+    this.nextAmmoAt = Infinity;
+
     this.firstRandomPair = 1;
     this.pairIndex = 0;
     this.narrowAt = [];
     this.closingAt = [];
   }
 
-  // Decides up front which pairs get a shortened gap and which start normal
-  // and squeeze shut as the bird nears. Called once per level.
-  PlanSpecialPairs(pacing, targetScore) {
-    // Roughly one pair per point, plus a little headroom for pairs skipped
-    // because they carry an enemy.
-    const span = targetScore + 3;
+  // Points earned under the current pacing block.
+  Progress() {
+    return Math.max(0, this.score - this.progressBase);
+  }
+
+  // The opening an ordinary pair spawns with, right now. Constant through a
+  // numbered level; closing steadily through the endless run.
+  CurrentGap() {
+    return pairGap(this.pacing, this.Progress());
+  }
+
+  // How long until the next pair, right now. Recomputed every frame rather
+  // than fixed per level: obstacle density is the difficulty dial that keeps
+  // turning for as long as the player keeps scoring.
+  PairIntervalMs(tickMs) {
+    return pairIntervalMs(
+      pairSpacing(this.pacing, this.Progress()),
+      this.obsSpeed,
+      tickMs,
+    );
+  }
+
+  // Decides up front which pairs get a shortened gap and which spawn at full
+  // height and snap shut. Called once per numbered level; the endless run
+  // rolls its tricks per pair instead, having no last pair to plan up to.
+  PlanSpecialPairs(pacing, targetScore, enemyCount) {
+    const span = trickSpan(targetScore, enemyCount, pacing.firstRandom);
     const picks = pickPairIndices(
       pacing.narrowGaps + pacing.closingGaps,
       pacing.firstRandom,
@@ -105,24 +152,80 @@ export class FlappyBird {
     this.pairIndex = 0;
   }
 
-  // Pairs marked closing start at a normal gap and tighten as the bird gets
-  // close, so the player has to react to the gap rather than read it from the
-  // far side of the screen.
-  UpdateClosingPairs() {
-    const from = this.startX + 340;
-    const to = this.startX;
+  // Pairs marked to snap come in at the height they spawned with, so they
+  // read as an ordinary gap from across the screen, and then close hard once
+  // the bird is committed to the approach. The player has to react to the gap
+  // rather than line up against it from the far side.
+  UpdateSnapPairs() {
+    const nose = this.startX + (this.bird ? this.bird.width : 64);
     for (let i = 0; i + 1 < this.obsList.length; i += 2) {
       const top = this.obsList[i];
       const bottom = this.obsList[i + 1];
-      if (!top.closing) {
+      if (!top.snapBy) {
         continue;
       }
-      const progress = Math.min(1, Math.max(0, (from - top.x) / (from - to)));
-      const shrink = (top.closing * progress) / 2;
-      top.height = top.baseHeight + shrink;
-      bottom.height = bottom.baseHeight + shrink;
+      const progress = snapProgress(
+        top.x,
+        nose,
+        this.snapTriggerAhead,
+        this.snapTravel,
+      );
+      if (progress === 0) {
+        continue;
+      }
+      const grow = (top.snapBy * progress) / 2;
+      top.height = top.baseHeight + grow;
+      bottom.height = bottom.baseHeight + grow;
       bottom.y = this.mapHeight - bottom.height;
     }
+  }
+
+  // Level 3 is cleared and the player chose to keep going rather than go
+  // home. The score stays — it was earned — and becomes the baseline the
+  // endless curve counts its own progress from.
+  //
+  // The field is cleared and restarted rather than resumed from where the win
+  // screen froze it. That frame landed wherever the fifteenth point happened
+  // to fall, which can be a wingtip from a cactus, and dropping the player
+  // back into it would be a death they had no part in.
+  EnterEndless(cfg) {
+    this.endless = true;
+    this.pacing = cfg;
+    this.progressBase = this.score;
+    this.nextAmmoAt = this.score + cfg.ammoEvery;
+
+    this.obsSpeed = cfg.obsSpeed;
+    this.upSpeed = cfg.upSpeed;
+    this.downSpeed = cfg.downSpeed;
+    this.firstRandomPair = cfg.firstRandom;
+    // No target to reach and no supply to run out of: both of those are
+    // endings, and this mode has exactly one.
+    this.scoreLimitCount = Infinity;
+    this.enemyLimitCount = Infinity;
+    this.enemyIntervalCount = enemyInterval(cfg, 0);
+    this.enemyCount = 0;
+    this.bulletLimitCount = Math.max(this.bulletLimitCount, 2);
+
+    this.gameOver = false;
+    this.gameWin = false;
+    this.touch = false;
+    this.spaceTouch = false;
+    this.bulletList = [];
+    this.enemyList = [];
+    this.narrowAt = [];
+    this.closingAt = [];
+    this.pairIndex = 0;
+
+    this.bird.y = this.startY;
+    const h = 200;
+    const h2 = this.mapHeight - h - this.CurrentGap();
+    const top = new Obstacle(this.mapWidth, 0, h, this.obs, "down");
+    const bottom = new Obstacle(
+      this.mapWidth, this.mapHeight - h2, h2, this.obs, "up");
+    top.snapBy = 0;
+    top.baseHeight = h;
+    bottom.baseHeight = h2;
+    this.obsList = [top, bottom];
   }
 
   // Load this level's images and lay out the opening screen.
@@ -162,10 +265,10 @@ export class FlappyBird {
     if (!state.isJump) {
       this.obs.onload = function () {
         const h = 200; // height of the first hanging obstacle
-        const h2 = this.mapHeight - h - this.obsDistance;
+        const h2 = this.mapHeight - h - this.CurrentGap();
         const obs1 = new Obstacle(this.mapWidth, 0, h, this.obs, "down");
         const obs2 = new Obstacle(this.mapWidth, this.mapHeight - h2, h2, this.obs, "up");
-        obs1.closing = 0;
+        obs1.snapBy = 0;
         obs1.baseHeight = h;
         obs2.baseHeight = h2;
         this.obsList.push(obs1);
@@ -179,7 +282,7 @@ export class FlappyBird {
       this.enemy = new Image();
       this.enemy.onload = function () {
         // Positioned in the gap of the first obstacle pair, whose h is 200.
-        const enemyY = 200 + this.obsDistance / 2 - this.enemy.height;
+        const enemyY = 200 + this.CurrentGap() / 2 - this.enemy.height;
         this.enemyList.push(new Enemy(this.mapWidth, enemyY, this.enemy));
         this.enemyLimitCount--;
       }.bind(this);
@@ -187,31 +290,59 @@ export class FlappyBird {
     }
   }
 
+  // Which trick this pair gets. A numbered level works through the list
+  // planned at the start; the endless run rolls for it, against odds that
+  // climb with the score.
+  PickTrick(carriesEnemy) {
+    if (carriesEnemy) {
+      // Two hazards on one pair is a wall, not a step up in difficulty.
+      return "none";
+    }
+    if (!this.endless) {
+      return nextPairTrick(
+        this.pairIndex,
+        this.firstRandomPair,
+        carriesEnemy,
+        this.narrowAt,
+        this.closingAt,
+      );
+    }
+    const progress = this.Progress();
+    if (Math.random() < snapChance(this.pacing, progress)) {
+      return "closing";
+    }
+    if (Math.random() < narrowChance(this.pacing, progress)) {
+      return "narrow";
+    }
+    return "none";
+  }
+
   // Spawn the next obstacle pair, and an enemy every enemyIntervalCount pairs.
   CreateObs() {
     this.pairIndex++;
 
-    // A pair that also carries an enemy is left alone: two hazards at once is
-    // not a step up in difficulty, it is a wall.
+    // Enemies close up as the endless run goes on; a numbered level keeps the
+    // interval its table gave it.
+    if (this.endless) {
+      this.enemyIntervalCount = enemyInterval(this.pacing, this.Progress());
+    }
+
     const carriesEnemy =
       this.enemyLimitCount > 0 &&
       this.enemyCount + 1 >= this.enemyIntervalCount;
 
-    let gap = this.obsDistance;
-    let closing = 0;
-    const trick = nextPairTrick(
-      this.pairIndex,
-      this.firstRandomPair,
-      carriesEnemy,
-      this.narrowAt,
-      this.closingAt,
-    );
+    let gap = this.CurrentGap();
+    let snapBy = 0;
+    const trick = this.PickTrick(carriesEnemy);
     if (trick === "narrow") {
       this.narrowAt.shift();
-      gap -= this.narrowBy;
+      gap = shortenGap(gap, this.pacing.narrowBy);
     } else if (trick === "closing") {
       this.closingAt.shift();
-      closing = this.narrowBy;
+      // The pair spawns at the full gap and loses this much on the approach.
+      // Clamped the same way a narrow gap is, so a late endless pair whose
+      // ordinary gap is already tight cannot snap shut to nothing.
+      snapBy = gap - shortenGap(gap, this.pacing.closeBy);
     }
 
     const h = Math.floor(
@@ -220,7 +351,7 @@ export class FlappyBird {
     const h2 = this.mapHeight - h - gap;
     const obs1 = new Obstacle(this.mapWidth, 0, h, this.obs, "down");
     const obs2 = new Obstacle(this.mapWidth, this.mapHeight - h2, h2, this.obs, "up");
-    obs1.closing = closing;
+    obs1.snapBy = snapBy;
     obs1.baseHeight = h;
     obs2.baseHeight = h2;
     this.obsList.push(obs1);
@@ -233,7 +364,7 @@ export class FlappyBird {
     if (this.enemyLimitCount > 0) {
       this.enemyCount++;
       if (this.enemyCount >= this.enemyIntervalCount) {
-        const enemyY = h + this.obsDistance / 2 - this.enemy.height;
+        const enemyY = h + gap / 2 - this.enemy.height;
         this.enemyList.push(new Enemy(this.mapWidth, enemyY, this.enemy));
         this.enemyCount = 0;
         this.enemyLimitCount--;
@@ -386,7 +517,20 @@ export class FlappyBird {
       }
     }
 
-    if (this.score === this.scoreLimitCount) {
+    // The endless run keeps issuing rounds. Without this the enemies that
+    // arrive every second pair late on would be gaps that can neither be
+    // flown through nor shot open. `>=` rather than `===` on the target
+    // because a frame can score twice — a pair passed and an enemy killed —
+    // and stepping over the target used to mean the level never ended.
+    if (this.endless) {
+      while (this.score >= this.nextAmmoAt) {
+        this.nextAmmoAt += this.pacing.ammoEvery;
+        this.bulletLimitCount = Math.min(
+          this.pacing.maxAmmo,
+          this.bulletLimitCount + 1,
+        );
+      }
+    } else if (this.score >= this.scoreLimitCount) {
       this.gameWin = true;
     }
   }
@@ -459,7 +603,7 @@ export class FlappyBird {
     drawPlayButton(ctx, RESTART_RECT);
   }
 
-  ShowWin() {
+  ShowWin(offerEndless) {
     const ctx = state.ctx;
     winSound.currentTime = 0;
     winSound.play();
@@ -473,6 +617,28 @@ export class FlappyBird {
     ctx.fillStyle = "#fff";
     centerText(ctx, "YOU WIN", this.mapWidth / 2, 260);
     ctx.restore();
-    drawPlayButton(ctx, RESTART_RECT);
+
+    if (!offerEndless) {
+      drawPlayButton(ctx, RESTART_RECT);
+      return;
+    }
+    // Two ways on rather than one. A house and an arrow are the whole of the
+    // question — the brief allows no sentence explaining that one of them
+    // keeps going.
+    drawHomeButton(ctx, CHOICE_HOME_RECT);
+    drawPlayButton(ctx, CHOICE_PLAY_RECT);
+  }
+
+  // How the endless run ends. It cannot be lost, because there was nothing to
+  // win, so there is no GAME OVER banner: hitting something stops the run and
+  // the run's whole result is the number, shown at the size the result of a
+  // thing should be shown at.
+  ShowFinalScore() {
+    const ctx = state.ctx;
+    overSound.currentTime = 0;
+    overSound.play();
+    drawDigitsCentered(ctx, this.score, this.mapWidth / 2, 200, 5);
+    drawHomeButton(ctx, CHOICE_HOME_RECT);
+    drawPlayButton(ctx, CHOICE_PLAY_RECT);
   }
 }

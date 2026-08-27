@@ -1,12 +1,24 @@
 import { describe, expect, it } from "vitest";
 import {
+  climb,
   enemyInFiringLine,
+  enemyInterval,
+  GAP_FLOOR,
+  narrowChance,
   nextPairTrick,
+  pairGap,
+  pairIntervalMs,
+  pairSpacing,
   pickPairIndices,
   rectHitsMask,
   rectsOverlap,
+  shortenGap,
+  snapChance,
+  snapProgress,
+  tighten,
+  trickSpan,
 } from "../src/scripts/game/rules.js";
-import { levels } from "../src/scripts/game/levels.js";
+import { endless, levels } from "../src/scripts/game/levels.js";
 
 // A contract test for this week's brief: "one rule carries a focused
 // automated test". It retires with the brief, per spec/README.md.
@@ -289,9 +301,256 @@ describe("level pacing rises across levels 1 to 3", () => {
   it("never narrows a gap to something impossible", () => {
     for (const key of [1, 2, 3, 4] as const) {
       const p = levels[key].pacing;
-      // 200 is the base gap; the bird is at most 64 tall.
-      expect(200 - p.narrowBy).toBeGreaterThan(100);
+      // The bird is at most 64 tall, in level 1.
+      expect(shortenGap(p.gap, p.narrowBy)).toBeGreaterThan(100);
+      expect(shortenGap(p.gap, p.closeBy)).toBeGreaterThan(100);
     }
+  });
+});
+
+// A trick nobody notices is not a difficulty step, it is a rendering
+// coincidence. Both halves of that were true: the depth was ~10% of the gap,
+// and the pair it was planned for often never spawned.
+describe("a gap trick is deep enough to see", () => {
+  it("takes at least a fifth of the gap away, in every level", () => {
+    for (const key of [1, 2, 3, 4] as const) {
+      const p = levels[key].pacing;
+      expect(p.narrowBy / p.gap).toBeGreaterThanOrEqual(0.2);
+    }
+  });
+
+  it("makes a pair that springs shut bite harder than one born short", () => {
+    // A short gap can be read from across the screen and lined up against; one
+    // that closes on the approach cannot, so it has to cost more to be worth
+    // the surprise.
+    for (const key of [2, 3, 4] as const) {
+      const p = levels[key].pacing;
+      expect(p.closeBy).toBeGreaterThan(p.narrowBy);
+    }
+  });
+
+  it("never takes a gap below the floor, however deep the trick", () => {
+    expect(shortenGap(200, 40)).toBe(160);
+    expect(shortenGap(160, 70)).toBe(GAP_FLOOR);
+    expect(shortenGap(GAP_FLOOR, 999)).toBe(GAP_FLOOR);
+  });
+});
+
+// The pair that comes in at a plain height and then springs shut once the bird
+// is committed. Level 1 never does it; level 2 does it once a run and level 3
+// twice, which is the whole of the specification for this one.
+describe("the pair that springs shut", () => {
+  it("is not in level 1 at all", () => {
+    expect(levels[1].pacing.closingGaps).toBe(0);
+  });
+
+  it("happens once in level 2 and twice in level 3", () => {
+    expect(levels[2].pacing.closingGaps).toBe(1);
+    expect(levels[3].pacing.closingGaps).toBe(2);
+  });
+
+  // The numbers the game actually runs with. The bird never moves
+  // horizontally, so its nose is a constant: 360 plus the sprite's 48.
+  const NOSE = 408;
+  const TRIGGER = 180;
+  const TRAVEL = 45;
+  const SPAWN = 800;
+  const at = (x: number) => snapProgress(x, NOSE, TRIGGER, TRAVEL);
+
+  it("comes in at the height it spawned with", () => {
+    // The point of it: from across the screen it has to look like an ordinary
+    // gap, or there is no surprise to spring.
+    expect(at(SPAWN)).toBe(0);
+    expect(at(700)).toBe(0);
+    expect(at(NOSE + TRIGGER)).toBe(0);
+  });
+
+  it("shuts over a distance short enough to be an event", () => {
+    // Half a second at level 3's 2.9px per 30ms tick, against 340px — about
+    // three and a half seconds — for the version nobody noticed.
+    expect(at(NOSE + TRIGGER - TRAVEL / 2)).toBeCloseTo(0.5);
+    expect(at(NOSE + TRIGGER - TRAVEL)).toBe(1);
+    const seconds = TRAVEL / ((2.9 / 30) * 1000);
+    expect(seconds).toBeLessThan(0.6);
+  });
+
+  it("finishes shutting with runway left to answer it", () => {
+    // Where the pair is when the gap stops moving, measured from the bird.
+    const runway = TRIGGER - TRAVEL;
+    expect(at(NOSE + runway)).toBe(1);
+    // Over a second at the fastest level speed in the game.
+    expect(runway / ((2.9 / 30) * 1000)).toBeGreaterThan(1);
+  });
+
+  it("stays shut once it has shut", () => {
+    expect(at(NOSE)).toBe(1);
+    expect(at(0)).toBe(1);
+    expect(at(-500)).toBe(1);
+  });
+});
+
+// Why a planned trick could go a whole run without happening: a point comes
+// from shooting an enemy as well as from flying past a pair, so a level with
+// enemies reaches its target in fewer pairs than the target names. Planning
+// against `targetScore + 3` put level 1's single narrow gap somewhere in
+// indices 2..9 while only five pairs ever spawned.
+describe("trickSpan", () => {
+  it("keeps every level's plan inside the pairs it actually spawns", () => {
+    for (const key of [1, 2, 3, 4] as const) {
+      const level = levels[key];
+      const span = trickSpan(
+        level.num[0].scoreC,
+        level.num[0].enemyC,
+        level.pacing.firstRandom,
+      );
+      const lastPlannable = level.pacing.firstRandom + span - 1;
+      // Every point that is not a kill is a pair flown past, so this is the
+      // last pair index the run can reach.
+      const lastPair = level.num[0].scoreC - level.num[0].enemyC;
+      expect(lastPlannable).toBeLessThanOrEqual(lastPair);
+    }
+  });
+
+  it("shrinks the window as a level hands out more of its points for kills", () => {
+    expect(trickSpan(15, 0, 1)).toBeGreaterThan(trickSpan(15, 3, 1));
+  });
+
+  it("never collapses to nothing", () => {
+    expect(trickSpan(2, 5, 2)).toBe(2);
+  });
+});
+
+// Obstacle density. It used to be a fixed 6000ms between pairs, which is not a
+// fixed distance: the faster a level ran, the further apart its obstacles
+// landed, so level 3 flew through 580px of clear air where level 1 flew
+// through 400. Spacing is authored in pixels now, and it closes up as the
+// score climbs rather than being a property of the level.
+describe("obstacle density rises with the score", () => {
+  it("holds the base at the first point and eases down from there", () => {
+    expect(tighten(400, 10, 0, 240)).toBe(400);
+    expect(tighten(400, 10, 5, 240)).toBe(350);
+  });
+
+  it("holds at the floor rather than passing through it", () => {
+    expect(tighten(400, 10, 50, 240)).toBe(240);
+    expect(tighten(400, 10, 5000, 240)).toBe(240);
+  });
+
+  it("treats a score behind the baseline as no progress", () => {
+    expect(tighten(400, 10, -8, 240)).toBe(400);
+    expect(climb(0.2, 0.02, -8, 0.6)).toBe(0.2);
+  });
+
+  it("climbs to a ceiling and stops there", () => {
+    expect(climb(0.2, 0.02, 0, 0.6)).toBeCloseTo(0.2);
+    expect(climb(0.2, 0.02, 10, 0.6)).toBeCloseTo(0.4);
+    expect(climb(0.2, 0.02, 500, 0.6)).toBe(0.6);
+  });
+
+  it("closes the field up over the course of every level", () => {
+    for (const key of [1, 2, 3, 4] as const) {
+      const level = levels[key];
+      const opening = pairSpacing(level.pacing, 0);
+      const closing = pairSpacing(level.pacing, level.num[0].scoreC);
+      expect(closing).toBeLessThan(opening);
+      expect(closing).toBeGreaterThanOrEqual(level.pacing.minSpacing);
+    }
+  });
+
+  it("ends level 3 denser than level 1 ever begins", () => {
+    // The thing the fixed millisecond interval had backwards.
+    expect(pairSpacing(levels[3].pacing, 15)).toBeLessThan(
+      pairSpacing(levels[1].pacing, 0),
+    );
+  });
+
+  it("waits less for the same spacing when the world moves faster", () => {
+    const slow = pairIntervalMs(400, 2, 30);
+    const fast = pairIntervalMs(400, 2.9, 30);
+    expect(fast).toBeLessThan(slow);
+    // 400px at 2px per 30ms tick is 200 ticks, which is 6000ms — the number
+    // the old fixed interval happened to be right about, for level 1 only.
+    expect(slow).toBe(6000);
+  });
+});
+
+// The run level 3 offers instead of stopping. It has no target and no ending,
+// so its difficulty cannot be a table of levels: every dial is a function of
+// how far past the win the player has got.
+describe("the endless run", () => {
+  const AT_WIN = 0; // progress is counted from the score that won level 3
+  const DEEP = 40;
+
+  it("starts no harder than the level it continues from", () => {
+    expect(pairSpacing(endless, AT_WIN)).toBeGreaterThanOrEqual(
+      pairSpacing(levels[3].pacing, 15),
+    );
+    expect(pairGap(endless, AT_WIN)).toBeGreaterThanOrEqual(
+      pairGap(levels[3].pacing, 15),
+    );
+  });
+
+  it("ends up tighter than level 3 ever was", () => {
+    expect(pairSpacing(endless, DEEP)).toBeLessThan(
+      pairSpacing(levels[3].pacing, 15),
+    );
+    expect(pairGap(endless, DEEP)).toBeLessThan(
+      pairGap(levels[3].pacing, 15),
+    );
+  });
+
+  it("closes the gap itself, which a numbered level never does", () => {
+    for (const key of [1, 2, 3, 4] as const) {
+      expect(levels[key].pacing.gapPerPoint).toBe(0);
+    }
+    expect(endless.gapPerPoint).toBeGreaterThan(0);
+    expect(pairGap(endless, 10)).toBeLessThan(pairGap(endless, 0));
+  });
+
+  it("keeps every gap flyable however long the run goes on", () => {
+    expect(pairGap(endless, 10_000)).toBe(endless.minGap);
+    expect(shortenGap(pairGap(endless, 10_000), endless.closeBy)).toBe(
+      GAP_FLOOR,
+    );
+    // The bird is 48 tall in level 3's skin, and this is the tightest the run
+    // can ever get.
+    expect(GAP_FLOOR).toBeGreaterThan(48 * 2);
+  });
+
+  it("springs gaps shut more and more often, up to a ceiling", () => {
+    expect(snapChance(endless, 20)).toBeGreaterThan(snapChance(endless, 0));
+    expect(snapChance(endless, 10_000)).toBe(endless.maxSnapChance);
+    expect(narrowChance(endless, 20)).toBeGreaterThan(narrowChance(endless, 0));
+    expect(narrowChance(endless, 10_000)).toBe(endless.maxNarrowChance);
+  });
+
+  it("never makes a trick a certainty", () => {
+    // Something has to stay ordinary, or there is nothing for a trick to be a
+    // departure from.
+    expect(endless.maxSnapChance).toBeLessThan(1);
+    expect(endless.maxNarrowChance).toBeLessThan(1);
+  });
+
+  it("sends enemies closer together, in whole pairs, down to a floor", () => {
+    const early = enemyInterval(endless, 0);
+    const late = enemyInterval(endless, DEEP);
+    expect(late).toBeLessThan(early);
+    expect(Number.isInteger(early)).toBe(true);
+    expect(Number.isInteger(late)).toBe(true);
+    expect(enemyInterval(endless, 10_000)).toBe(endless.minEnemyInterval);
+    // Never every pair: an enemy sits in the gap, and a gap with an enemy in
+    // it every time is a wall.
+    expect(endless.minEnemyInterval).toBeGreaterThan(1);
+  });
+
+  it("issues ammo faster than it issues enemies", () => {
+    // Enemies keep coming and rounds are finite, so a run that hands out
+    // fewer rounds than enemies ends in gaps that can be neither flown
+    // through nor shot open.
+    const pairsPerEnemy = endless.minEnemyInterval;
+    const pointsPerRound = endless.ammoEvery;
+    expect(pointsPerRound).toBeGreaterThanOrEqual(pairsPerEnemy);
+    expect(endless.maxAmmo).toBeGreaterThan(0);
   });
 });
 

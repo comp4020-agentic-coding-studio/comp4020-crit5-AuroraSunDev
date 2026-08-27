@@ -47,7 +47,8 @@ src/scripts/
   game/
     state.js       all mutable state that crosses a module boundary
     paths.js       asset() — resolves runtime URLs against BASE_URL
-    levels.js      the level table, including each level's `pacing` block
+    levels.js      the level table with each level's `pacing` block, and the
+                   `endless` block that level 3's win screen can continue into
     rules.js       pure game rules; the only module the spec suite imports
     mask.js        hitboxes measured from sprite alpha channels
     ui.js          shared screen furniture, pixel font, digit rendering
@@ -82,6 +83,17 @@ supplied, and it is a status word). Both show the same play icon again as an
 on-screen restart — the player already learned it. Enter still reloads as a
 second path.
 
+Level 3's win screen and the end of an endless run ask a question instead, so
+they carry two buttons: a house and the play arrow. The kit supplied no second
+button, so the house is drawn — chrome and geometry both *measured* off
+`button_play.png` rather than guessed. The asset is 116x70 but its chrome is
+only 104x58 of that, inset 6px each side, 3 above and 9 below; a full-bleed
+rounded rect beside it came out visibly larger, which a screenshot caught and
+nothing else would have. Colours are sampled too: `#fafafa` over `#ededed`,
+border `#543847`, a `#d6be9b` bevel line, glyph `#00a848`. The house itself is
+a 13x11 bitmap drawn cell by cell, because everything else on the canvas is
+pixel art and a smooth path would be the only curve on the screen.
+
 **Level select.** Three tiles, English labels, no caption. The old bottom bar
 ("click the character you like to enter the level") was an instruction.
 
@@ -109,21 +121,80 @@ and the first obstacle pair before running, because `CountScore` reads
 `obsList[0]` unguarded.
 
 **Difficulty lives in one `pacing` block per level** in `levels.js`, so the
-whole curve can be read in one place.
+whole curve can be read in one place. Base gap 200px; floor 130px everywhere.
 
-| | world speed | press throw (up/down) | narrow gaps | closing gaps | earliest pair |
+| | world speed | press throw | narrow gaps | springing gaps | pair spacing |
 |---|---|---|---|---|---|
-| 1 | 2.0 | 8 / 3 | 1 (−20px) | 0 | 3rd |
-| 2 | 2.4 | 8 / 3 | 2 (−20px) | 1 | 2nd |
-| 3 | 2.9 | 11 / 4.5 | 3 (−24px) | 2 | 2nd |
-| 4 | 2.9 | 11 / 4.5 | 2 (−24px) | 1 | 2nd |
+| 1 | 2.0 | 8 / 3 | 1 (−40px) | 0 | 400 → 330 |
+| 2 | 2.4 | 8 / 3 | 2 (−48px) | 1 (−64px) | 420 → 320 |
+| 3 | 2.9 | 11 / 4.5 | 3 (−56px) | 2 (−70px) | 460 → 290 |
+| 4 | 2.9 | 11 / 4.5 | 2 (−56px) | 1 (−70px) | 460 → 290 |
+| endless | 2.9 | 11 / 4.5 | 15%→45% of pairs | 18%→60% of pairs | 400 → 240 |
 
-A *narrow* pair has a shorter gap from the moment it spawns; a *closing* pair
-starts normal and squeezes shut as the bird nears it. Two exclusions, both
+A *narrow* pair has a shorter gap from the moment it spawns; a *springing* pair
+comes in at full height and slams shut on the approach. Two exclusions, both
 deliberate: **no level tricks its opening pair** (a trick before a plain gap
 just reads as a broken gap), and **no pair carrying an enemy is tricked** (two
 hazards at once is a wall, not a step up). A pick that lands on an enemy pair
 is not lost — it falls through to the next eligible pair.
+
+**A trick nobody notices is not a difficulty step.** Both halves of that were
+true of the first version, and each had its own cause.
+
+- **The depth was ~10% of the gap.** 20px out of 200 is a real difference and
+  an imperceptible one. Now a fifth to a third, which the spec suite asserts as
+  a ratio rather than a magic number.
+- **The pair it was planned for often never spawned.** The pool was
+  `targetScore + 3` wide, but a point comes from *shooting an enemy* as well as
+  from flying past a pair, so a level with enemies reaches its target in fewer
+  pairs than its target names. Level 1 picked its single narrow gap from
+  indices 2..9 while five pairs ever spawned — better than even odds of a run
+  with no trick in it at all. `trickSpan` subtracts the enemies.
+
+**A springing pair snaps rather than eases.** It used to close 20px smoothly
+across 340px of approach: real, gradual, and invisible. It now holds its spawn
+height until its leading edge is 180px in front of the bird's nose, then shuts
+over 45px — about half a second at level 3's speed. Measured on the real code:
+gap 200 at x=620, 156 at x=560, 130 at x=500 and held. It finishes closing with
+135px of runway left, roughly 1.4s to answer it. Both numbers matter: sudden
+enough to be an event, finished early enough to be a hazard rather than an
+ambush.
+
+**Obstacle density is a distance, and it tightens with the score.** The
+interval was a fixed 6000ms, which is not a fixed distance — the faster a level
+ran, the further apart its obstacles landed, so level 3 flew through 580px of
+clear air where level 1 flew through 400 and the hardest level had the airiest
+field. Spacing is authored in pixels now and converted per frame
+(`pairIntervalMs`), and it closes linearly with the score down to a floor. No
+level has a fixed obstacle count; the field just keeps closing up for as long
+as the player keeps scoring.
+
+**Clearing level 3 is not the end of it.** The win screen offers the way home
+*or* an endless run, and the endless run has no target and no win. It is not a
+level: no `scoreC`, no `IsCleared`, no `jump`. Every dial from the table keeps
+turning — the gap itself closes (1.5px a point to a 160 floor, which no
+numbered level does), spacing closes to 240, enemies arrive every 2 pairs
+instead of 5, and the springing gap goes from occasional to the normal state of
+affairs. Its tricks are rolled per pair rather than planned as a list of
+indices: a list has a length and this has none.
+
+Four decisions inside it:
+
+- **The score carries and becomes the baseline.** Fifteen points were earned;
+  progress is counted from there, so the curve starts at its own beginning
+  rather than fifteen points into itself.
+- **Ammo keeps coming**, one round per 4 points to a cap of 6. Enemies sit in
+  the gap, so an endless supply of enemies against a finite 4 rounds is a run
+  that ends in gaps that can be neither flown through nor shot open.
+- **The easter egg is switched off.** Being yanked into level 4 is an ending of
+  sorts, and not ending is the whole of what this mode is.
+- **The field restarts rather than resumes.** The win screen froze wherever the
+  fifteenth point landed, which can be a wingtip from a cactus; dropping the
+  player back into that is a death they had no part in.
+
+**It has no losing.** Hitting something stops the run, and there was nothing to
+win, so there is no `GAME OVER`. The screen is the final score in the digit
+sprites at 5x, centred, and the same two buttons.
 
 ## Presentation
 
@@ -175,7 +246,16 @@ Carried forward as how this repo checks itself:
   every reading low.
 - **rAF motion needs real time.** Virtual time does not chain it.
 
-Current state: `astro check` 0 errors / 0 warnings / 0 hints, 58 tests green.
+- **A harness beats a screenshot for anything the loop produces.** The
+  difficulty rework was checked by a scratch Astro page that instantiates
+  `FlappyBird` with real images and calls `CreateObs` and `UpdateSnapPairs`
+  directly, printing gaps and spacings to the DOM — no rAF, so
+  `--virtual-time-budget` works on it, and it exercises the real modules rather
+  than a copy. It is what caught that level 3's two springing pairs both defer
+  to indices 7 and 8, and it is deleted rather than committed: a probe that
+  ships is a page nobody maintains.
+
+Current state: `astro check` 0 errors / 0 warnings / 0 hints, 85 tests green.
 
 ## Shipped
 
@@ -183,7 +263,8 @@ Current state: `astro check` 0 errors / 0 warnings / 0 hints, 58 tests green.
 `1935e09` touch and responsive · `4a5706e` AABB collision rule and its test ·
 `0826502` rAF and delta time · `eb93477` cleanup · `7f83422` asset and score
 polish · `5eb2023` PROCESS.md · `be145ca` page and typography rework ·
-`09d8097` auto-fire · `289529e` outline collision and level pacing
+`09d8097` auto-fire · `289529e` outline collision and level pacing ·
+`ce8c987` PLAN.md as decisions
 
 ## Open
 
@@ -193,12 +274,25 @@ polish · `5eb2023` PROCESS.md · `be145ca` page and typography rework ·
    is the single blocking item: the deployed site is what gets marked.
 2. **`reflections/crit-5.md` is empty.** 150–300 words, the two standing
    prompts. The student's to write.
-3. **Level 3's tuning is unvalidated by a human.** The press throw of 11 / 4.5
-   was chosen to make holding a line take timing rather than reaction, but only
-   the numbers have been checked, not the feel.
+3. **The whole difficulty rework is unvalidated by a human.** The numbers are
+   checked — by the spec suite, and by a scratch harness that ran the real
+   spawning code — but numbers are not feel, and every one of these is a
+   judgement about feel: the press throw of 11 / 4.5, the new trick depths,
+   whether 45px of travel reads as a slam or a glitch, whether 135px of runway
+   is enough to answer one, and whether level 3 at 290px spacing is hard or
+   unfair. **Play all three levels before the crit.**
 4. **Level 4 has never been reached end to end.** Auto-fire makes the
    three-kill easter egg possible again, but nobody has played through to it.
-5. **The person-judged spec lines are unverified**: no instructions anywhere,
+   Note that level 3's enemy every 2 pairs means its five tricks all defer past
+   pairs 2, 4 and 6 and land in the back half of the run — intended by the
+   fall-through rule, but worth watching for bunching.
+5. **The endless run has never been played.** Its escalation is asserted at 60
+   pairs by the harness and by the suite, and its two-button screens have been
+   rendered and looked at, but nobody has resumed into it from a real win.
+   Watch for the two things the numbers cannot answer: whether the house icon
+   reads as "home" with no caption, and whether a run that ends with a bare
+   number reads as an ending at all.
+6. **The person-judged spec lines are unverified**: no instructions anywhere,
    and a stranger reaching an ending within five minutes. These are not
    fakeable by a test — confirm with an actual first-time player before the
    crit.

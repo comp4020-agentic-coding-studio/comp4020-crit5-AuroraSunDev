@@ -1,10 +1,12 @@
 import { FlappyBird } from "./flappyBird.js";
-import { levels } from "./levels.js";
+import { endless, levels } from "./levels.js";
 import { asset } from "./paths.js";
 import { setCanvas, state } from "./state.js";
 import {
   breathe,
   centerText,
+  CHOICE_HOME_RECT,
+  CHOICE_PLAY_RECT,
   drawPlayButton,
   font,
   hits,
@@ -35,6 +37,10 @@ const game = new FlappyBird();
 // Whether this level issues ammo at all, and so whether to draw the count.
 let levelHasAmmo = false;
 let Speed; // ms between frames, per level
+// Set while a screen is showing two buttons rather than one: level 3's win
+// screen, and the end of an endless run. Null the rest of the time, so the
+// single-button end screens keep hit-testing against their own rect.
+let choiceScreen = null;
 
 export function initGame(canvas) {
   setCanvas(canvas);
@@ -114,6 +120,21 @@ function HandlePrimaryTap() {
   if (!state.isPlay && state.isSelect && mousePos != null) {
     Select();
   }
+  // A screen with two answers: the house goes home, the arrow keeps going.
+  // Checked before the single-button case because both are drawn while
+  // gameOver or gameWin is set.
+  if (choiceScreen != null && mousePos != null) {
+    if (hits(CHOICE_HOME_RECT, mousePos)) {
+      location.reload(); // a reload lands on the home screen
+    } else if (hits(CHOICE_PLAY_RECT, mousePos)) {
+      // Resuming from the win keeps the fifteen points that got you here;
+      // going again after an endless run ended starts a new one from nothing.
+      const keepScore = choiceScreen === "win";
+      choiceScreen = null;
+      StartEndless(keepScore);
+    }
+    return;
+  }
   // An end screen: the same play icon restarts. Without this a mouse- or
   // touch-only player who reaches Game Over can only get a second go by
   // knowing about the Enter key, which is an instruction nobody gave them.
@@ -122,6 +143,23 @@ function HandlePrimaryTap() {
       location.reload();
     }
   }
+}
+
+// The endless run: level 3's pacing with the target taken off it and every
+// dial still turning. Started from the win screen, or from the end of a
+// previous run.
+function StartEndless(keepScore) {
+  if (!keepScore) {
+    game.score = 0;
+  }
+  game.EnterEndless(endless);
+  state.jumpEnemyCount = 3; // unused while endless, but not left at zero
+  levelHasAmmo = true;
+  state.isPlay = true;
+  state.ctx.clearRect(0, 0, state.canvas.width, state.canvas.height);
+  sound.currentTime = 0;
+  sound.play();
+  RunGame(Speed);
 }
 
 // Apply a level's data to the running game.
@@ -139,14 +177,21 @@ function InitScript(stage) {
   Speed = stage.IntervalSpeed[0].ITVSpeed;
 
   // Difficulty: how fast the world moves, how far one press throws the bird,
-  // and which pairs get a shortened or closing gap.
+  // how far apart the pairs start, and which of them get a shortened or a
+  // snapping gap.
   const pacing = stage.pacing;
+  game.pacing = pacing;
+  game.endless = false;
+  game.progressBase = 0;
+  game.nextAmmoAt = Infinity;
   game.obsSpeed = pacing.obsSpeed;
   game.upSpeed = pacing.upSpeed;
   game.downSpeed = pacing.downSpeed;
-  game.narrowBy = pacing.narrowBy;
   game.firstRandomPair = pacing.firstRandom;
-  game.PlanSpecialPairs(pacing, stage.num[0].scoreC);
+  // The enemy count matters to the plan: a point comes from a kill as well as
+  // from a pair, so a level with enemies reaches its target in fewer pairs
+  // than its target score suggests.
+  game.PlanSpecialPairs(pacing, stage.num[0].scoreC, stage.num[0].enemyC);
 }
 
 // The loop runs on requestAnimationFrame rather than a fixed setInterval, so
@@ -179,13 +224,22 @@ function RunGame(speed) {
     game.CanMove();
     if (game.gameOver) {
       sound.pause();
-      game.ShowOver();
       state.isPlay = false;
+      // An endless run cannot be lost, because there was nothing to win. It
+      // gets its score, not a banner saying it failed.
+      if (game.endless) {
+        game.ShowFinalScore();
+        choiceScreen = "over";
+      } else {
+        game.ShowOver();
+      }
       return;
     }
     if (game.gameWin) {
       sound.pause();
-      game.ShowWin();
+      const offerEndless = state.curStage.endless === true;
+      game.ShowWin(offerEndless);
+      choiceScreen = offerEndless ? "win" : null;
       state.isPlay = false;
       if (!state.curStage.IsCleared[0].flag) {
         state.curStage.IsCleared[0].flag = true;
@@ -194,15 +248,19 @@ function RunGame(speed) {
       return;
     }
 
+    // Obstacle density is not a fixed count per level: the interval is read
+    // back every frame from the current score, so the field keeps closing up
+    // for as long as the player keeps scoring.
     sinceLastObs += elapsed;
-    if (sinceLastObs >= game.obsInterval) {
-      sinceLastObs -= game.obsInterval;
+    const interval = game.PairIntervalMs(speed);
+    if (sinceLastObs >= interval) {
+      sinceLastObs -= interval;
       game.CreateObs();
     }
 
     // Clear, then draw, then update.
     game.ClearScreen();
-    game.UpdateClosingPairs();
+    game.UpdateSnapPairs();
     game.DrawObs(step);
     if (game.enemyLimitCount >= 0) {
       game.DrawEnemy(step);
@@ -239,7 +297,14 @@ function GetPointerPos(clientX, clientY) {
 }
 
 // The easter egg: kill jumpEnemyCount enemies and the level swaps under you.
+//
+// Switched off during an endless run. Being yanked into level 4 is an ending
+// of sorts — a new level, a new target — and not stopping is the whole of
+// what that mode is.
 function CheckJump(cStage) {
+  if (game.endless) {
+    return;
+  }
   if (state.jumpEnemyCount === 0) {
     state.isJump = true;
   }

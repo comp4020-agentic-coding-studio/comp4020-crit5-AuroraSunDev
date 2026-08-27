@@ -55,6 +55,12 @@ export const HOME_PLAY_RECT = { x: 255, y: 390, width: 290, height: 175 };
 export const GAME_OVER_RECT = { x: 196, y: 200, width: 408, height: 108 };
 export const RESTART_RECT = { x: 284, y: 370, width: 232, height: 140 };
 
+// A screen that asks a question rather than offering one way on: level 3's win
+// screen, and the end of an endless run. Both sit symmetrically about the
+// centre line, at a size a thumb can hit on a 390px-wide phone.
+export const CHOICE_HOME_RECT = { x: 186, y: 380, width: 174, height: 105 };
+export const CHOICE_PLAY_RECT = { x: 440, y: 380, width: 174, height: 105 };
+
 // The same icon starts the game and restarts it, so a player who tapped it
 // once on the home screen already knows what it does on the end screen.
 // `pulse` scales it about its own centre for the idle breathing animation.
@@ -68,6 +74,108 @@ export function drawPlayButton(ctx, rect, pulse = 1) {
     w,
     h,
   );
+}
+
+// The kit supplied no second button, and the win screen now asks a question
+// with two answers, so this one is drawn. Both its colours and its geometry
+// are measured off button_play.png rather than guessed, because the first
+// attempt guessed and the two buttons came out visibly different sizes: the
+// asset is 116x70 but its chrome is only 104x58 of that, sitting 6px in from
+// each side, 3px down from the top and 9px up from the bottom. A full-bleed
+// rounded rect beside it reads as a different button from a different game.
+const BTN_TOP = "#fafafa";
+const BTN_BOTTOM = "#ededed";
+const BTN_BEVEL = "#d6be9b"; // the warm line just inside the bottom edge
+const BTN_BORDER = "#543847";
+const BTN_GLYPH = "#00a848";
+
+// Everything as a fraction of the rect the button is drawn into, so the two
+// line up at any size.
+const BTN = {
+  left: 6 / 116,
+  right: 110 / 116,
+  top: 3 / 70,
+  bottom: 61 / 70,
+  border: 2 / 70,
+  bevel: 2 / 70,
+  radius: 6 / 70,
+  split: 26 / 54, // where #fafafa gives way to #ededed
+  glyph: 0.55, // glyph height as a fraction of the chrome's
+};
+
+// A house, as a bitmap, because everything else on this canvas is pixel art
+// and a smooth path would be the only curve on the screen. 13 wide by 11 tall:
+// roof, walls, door.
+const HOUSE = [
+  "......#......",
+  ".....###.....",
+  "....#####....",
+  "...#######...",
+  "..#########..",
+  ".###########.",
+  ".#.........#.",
+  ".#...###...#.",
+  ".#...#.#...#.",
+  ".#...#.#...#.",
+  ".###########.",
+];
+
+function roundedRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// Home, as a sibling of the play icon: same shell, different glyph. Sized
+// against the same rect shape the play button uses, so the two line up.
+export function drawHomeButton(ctx, rect) {
+  const x = rect.x + rect.width * BTN.left;
+  const w = rect.width * (BTN.right - BTN.left);
+  const y = rect.y + rect.height * BTN.top;
+  const h = rect.height * (BTN.bottom - BTN.top);
+  const border = rect.height * BTN.border;
+  const bevel = rect.height * BTN.bevel;
+  const radius = rect.height * BTN.radius;
+
+  ctx.save();
+  roundedRect(ctx, x, y, w, h, radius);
+  ctx.clip();
+  ctx.fillStyle = BTN_TOP;
+  ctx.fillRect(x, y, w, h * BTN.split);
+  ctx.fillStyle = BTN_BOTTOM;
+  ctx.fillRect(x, y + h * BTN.split, w, h * (1 - BTN.split));
+  ctx.fillStyle = BTN_BEVEL;
+  ctx.fillRect(x, y + h - border - bevel, w, bevel);
+  ctx.restore();
+
+  ctx.save();
+  roundedRect(ctx, x + border / 2, y + border / 2, w - border, h - border,
+    radius);
+  ctx.lineWidth = border;
+  ctx.strokeStyle = BTN_BORDER;
+  ctx.stroke();
+
+  // Whole-number cell size, so the bitmap stays a grid rather than blurring
+  // across half pixels the way the score digits would if they were scaled
+  // fractionally.
+  const cell = Math.max(1, Math.floor((h * BTN.glyph) / HOUSE.length));
+  const glyphW = HOUSE[0].length * cell;
+  const glyphH = HOUSE.length * cell;
+  const left = Math.round(x + (w - glyphW) / 2);
+  const top = Math.round(y + (h - glyphH) / 2);
+  ctx.fillStyle = BTN_GLYPH;
+  for (let row = 0; row < HOUSE.length; row++) {
+    for (let col = 0; col < HOUSE[row].length; col++) {
+      if (HOUSE[row][col] === "#") {
+        ctx.fillRect(left + col * cell, top + row * cell, cell, cell);
+      }
+    }
+  }
+  ctx.restore();
 }
 
 // Hit-tests against the unpulsed rect, so a tap lands the same whatever point
@@ -112,4 +220,17 @@ export function drawDigits(ctx, value, x, y, scale = 2) {
     ctx.drawImage(digitImgs[Number(digit)], cursor, y, w, h);
     cursor += w + gap;
   }
+}
+
+// The width the call above will occupy, so a caller that wants the number
+// centred can be told where to start rather than guessing per digit count.
+export function digitsWidth(value, scale) {
+  const n = String(Math.max(0, Math.floor(value))).length;
+  return n * DIGIT_W * scale + (n - 1) * 2 * scale;
+}
+
+// The endless run has no banner to put above its result, so the number is the
+// result: centred, and large enough to be the thing on the screen.
+export function drawDigitsCentered(ctx, value, centerX, y, scale) {
+  drawDigits(ctx, value, centerX - digitsWidth(value, scale) / 2, y, scale);
 }
