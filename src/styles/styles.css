@@ -7,10 +7,20 @@ body {
 }
 
 main {
-  max-width: 40rem;
+  max-width: 50rem;
   margin: 0 auto;
+  text-align: center;
 }
 
 a {
   color: #0b5fff;
+}
+
+/* Carried over from the original page's inline CSS. The canvas still draws at
+   a fixed 800x600 and does not yet scale to the viewport. */
+#game-canvas {
+  display: block;
+  margin: 0 auto;
+  background-color: #fff;
+  border: 3px solid #000;
 }

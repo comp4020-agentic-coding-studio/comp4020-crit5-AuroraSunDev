@@ -1,4 +1,11 @@
-// The TypeScript entry point, loaded as a module by index.html. Vite compiles
-// it; `pnpm typecheck` type-checks it. If the week's spec rules out
-// JavaScript, delete this file and the script tag that loads it.
-export {};
+// The entry point. Everything the game does hangs off initGame(); this file
+// only has to find the canvas and hand it over.
+import { initGame } from "./game/init.js";
+
+const canvas = document.querySelector<HTMLCanvasElement>("#game-canvas");
+
+if (canvas) {
+  initGame(canvas);
+} else {
+  console.error("#game-canvas is missing, so the game cannot start");
+}
