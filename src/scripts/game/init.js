@@ -3,16 +3,19 @@ import { levels } from "./levels.js";
 import { asset } from "./paths.js";
 import { setCanvas, state } from "./state.js";
 import { Bullet } from "./sprites/bullet.js";
+import {
+  breathe,
+  drawPlayButton,
+  hits,
+  HOME_PLAY_RECT,
+  READY_RECT,
+  readyImg,
+  RESTART_RECT,
+} from "./ui.js";
 
 // Background music.
 const sound = new Audio(asset("audio/bgsound.wav"));
 sound.volume = 0.4;
-
-// The home screen's button, measured when it is drawn.
-let homeButtonX = 0;
-let homeButtonY = 0;
-let homeButtonW = 0;
-let homeButtonH = 0;
 
 // Level-select screen.
 let mousePos = null;
@@ -52,7 +55,7 @@ export function initGame(canvas) {
 
   startBG.onload = function () {
     if (state.isHome) {
-      DrawHomePage();
+      RunHomeLoop();
     }
   };
   startBG.onerror = function () {
@@ -75,6 +78,14 @@ export function initGame(canvas) {
     }
     if (!state.isPlay && state.isSelect && mousePos != null) {
       Select();
+    }
+    // An end screen: the same play icon restarts. Without this a mouse-only
+    // player who reaches Game Over can only get a second go by knowing about
+    // the Enter key, which is an instruction nobody is allowed to give them.
+    if ((game.gameOver || game.gameWin) && mousePos != null) {
+      if (hits(RESTART_RECT, mousePos)) {
+        location.reload();
+      }
     }
   };
 
@@ -173,15 +184,11 @@ function CheckJump(cStage) {
   }
 }
 
-// Home screen: tapping the button opens level select.
+// Home screen: tapping the play icon opens level select.
 function HomeClick() {
-  const homeBetweenX =
-    mousePos.x >= homeButtonX && mousePos.x <= homeButtonX + homeButtonW;
-  const homeBetweenY =
-    mousePos.y >= homeButtonY && mousePos.y <= homeButtonY + homeButtonH;
-  if (homeBetweenX && homeBetweenY) {
+  if (hits(HOME_PLAY_RECT, mousePos)) {
     state.isSelect = true;
-    state.isHome = false;
+    state.isHome = false; // also stops the home screen's frame loop
     state.ctx.clearRect(0, 0, state.canvas.width, state.canvas.height);
     DrawSelect();
   }
@@ -244,73 +251,44 @@ function DrawTitle() {
   ctx.restore();
 }
 
-function DrawHomePage() {
+// The home screen carries no instructions: the game's name, a status banner,
+// and the play icon breathing to invite a tap. Everything else the player
+// learns by playing.
+function DrawHomePage(timestamp) {
   const ctx = state.ctx;
+  ctx.clearRect(0, 0, state.canvas.width, state.canvas.height);
   DrawBG_Title();
 
-  ctx.save();
-  ctx.fillStyle = "rgba(128,0,0,0.3)";
-  ctx.fillRect(130, 175, 540, 310);
-  ctx.restore();
-  ctx.save();
-  ctx.fillStyle = "#FAFAD2";
-  ctx.font = "40px sans-serif";
-  ctx.fillText("游戏说明", 315, 220);
-  ctx.restore();
-  ctx.save();
-  ctx.fillStyle = "#FFFACD";
-  ctx.font = "25px sans-serif";
-  ctx.fillText("玩法：", 150, 250);
-  ctx.fillText("1、点击屏幕，小鸟向上飞", 150, 280);
-  ctx.fillText("2、不点击屏幕时，小鸟下落", 150, 310);
-  ctx.fillText("3、按A键发出攻击", 150, 340);
-  ctx.fillText("游戏规则：", 150, 370);
-  ctx.fillText("1、小鸟不能掉地上，飞顶上，撞柱子和敌人", 150, 400);
-  ctx.fillText("2、每过一对障碍物或击杀一个敌人加一分", 150, 430);
-  ctx.fillText("3、达到目标分数便可通过(还有隐藏彩蛋哦)", 150, 460);
-  ctx.restore();
-
-  homeButtonX = 230;
-  homeButtonY = 500;
-  homeButtonW = 350;
-  homeButtonH = 60;
-  ctx.save();
-  ctx.fillStyle = "rgba(128,0,0,0.3)";
-  ctx.fillRect(homeButtonX, homeButtonY, homeButtonW, homeButtonH);
-  ctx.restore();
-  ctx.save();
-  ctx.strokeStyle = "rgb(160,82,45)";
-  ctx.lineWidth = 0.5;
-  ctx.fillStyle = "#fff";
-  ctx.font = "40px sans-serif";
-  ctx.fillText("点击开始游戏", 290, 540);
-  ctx.strokeText("点击开始游戏", 290, 540);
-  ctx.restore();
+  ctx.drawImage(readyImg, READY_RECT.x, READY_RECT.y,
+    READY_RECT.width, READY_RECT.height);
+  drawPlayButton(ctx, HOME_PLAY_RECT, breathe(timestamp));
 }
 
+// The breathing animation needs a frame loop, which the static screens did
+// not. It stops itself as soon as the home screen is no longer showing.
+function RunHomeLoop() {
+  const frame = function (timestamp) {
+    if (!state.isHome) {
+      return;
+    }
+    DrawHomePage(timestamp);
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
+}
+
+// Three tiles, no caption. The bottom bar used to read "click the character
+// you like to enter the level", which is an instruction; the tiles are the
+// only thing on the screen and the player has already tapped once to get here.
 function DrawSelect() {
-  const ctx = state.ctx;
   DrawBG_Title();
 
-  DrawGameLevel("1", level1Img, levelXY[0].x, levelXY[0].y, " 关卡一", "简单",
-    "目标分数 " + levels[1].num[0].scoreC);
-  DrawGameLevel("2", level2Img, levelXY[1].x, levelXY[1].y, "关卡二", "较难",
-    "目标分数 " + levels[2].num[0].scoreC);
-  DrawGameLevel("3", level3Img, levelXY[2].x, levelXY[2].y, "关卡三", "困难",
-    "目标分数 " + levels[3].num[0].scoreC);
-
-  ctx.save();
-  ctx.fillStyle = "rgba(128,0,0,0.3)";
-  ctx.fillRect(185, 500, 460, 60);
-  ctx.restore();
-  ctx.save();
-  ctx.strokeStyle = "rgb(160,82,45)";
-  ctx.lineWidth = 0.5;
-  ctx.fillStyle = "#fff";
-  ctx.font = "40px sans-serif";
-  ctx.fillText("点击喜欢的角色进入关卡", 195, 540);
-  ctx.strokeText("点击喜欢的角色进入关卡", 195, 540);
-  ctx.restore();
+  DrawGameLevel("1", level1Img, levelXY[0].x, levelXY[0].y, "Level 1", "Easy",
+    "Target " + levels[1].num[0].scoreC);
+  DrawGameLevel("2", level2Img, levelXY[1].x, levelXY[1].y, "Level 2", "Harder",
+    "Target " + levels[2].num[0].scoreC);
+  DrawGameLevel("3", level3Img, levelXY[2].x, levelXY[2].y, "Level 3", "Hard",
+    "Target " + levels[3].num[0].scoreC);
 }
 
 function DrawGameLevel(i, img, x, y, levelStr, difficultyStr, scoreStr) {
@@ -322,7 +300,7 @@ function DrawGameLevel(i, img, x, y, levelStr, difficultyStr, scoreStr) {
   ctx.lineWidth = 0.25;
   ctx.fillStyle = "#D2691E";
   ctx.font = "30px sans-serif";
-  const clearedStr = FindLocal(i) ? "已通关" : "未通关";
+  const clearedStr = FindLocal(i) ? "Cleared" : "Not cleared";
   ctx.fillText(clearedStr, x + 25, y - 10);
   ctx.strokeText(clearedStr, x + 25, y - 10);
   ctx.restore();

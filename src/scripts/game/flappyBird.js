@@ -3,6 +3,12 @@ import { state } from "./state.js";
 import { Bird } from "./sprites/bird.js";
 import { Enemy } from "./sprites/enemy.js";
 import { Obstacle } from "./sprites/obstacle.js";
+import {
+  drawPlayButton,
+  GAME_OVER_RECT,
+  gameOverImg,
+  RESTART_RECT,
+} from "./ui.js";
 
 // Sound effects. bulletSound is exported because the keyboard handler in
 // init.js fires it at the moment a shot is created.
@@ -187,8 +193,8 @@ FlappyBird.prototype = {
     ctx.lineWidth = 1;
     ctx.fillStyle = "#fff";
     ctx.font = "35px sans-serif";
-    ctx.fillText("剩余子弹: " + this.bulletLimitCount, 20, 105);
-    ctx.strokeText("剩余子弹: " + this.bulletLimitCount, 20, 105);
+    ctx.fillText("Ammo: " + this.bulletLimitCount, 20, 105);
+    ctx.strokeText("Ammo: " + this.bulletLimitCount, 20, 105);
     ctx.restore();
   },
 
@@ -273,8 +279,8 @@ FlappyBird.prototype = {
     ctx.lineWidth = 1;
     ctx.fillStyle = "#fff";
     ctx.font = "35px sans-serif";
-    ctx.fillText("分数: " + this.score, 20, 50);
-    ctx.strokeText("分数: " + this.score, 20, 50);
+    ctx.fillText("Score: " + this.score, 20, 50);
+    ctx.strokeText("Score: " + this.score, 20, 50);
     ctx.restore();
   },
 
@@ -350,29 +356,23 @@ FlappyBird.prototype = {
     state.ctx.drawImage(this.bg, 0, 0);
   },
 
+  // Both end screens show the play icon again rather than naming a key. It is
+  // the same control the player already used to start, so it needs no caption.
   ShowOver: function () {
     const ctx = state.ctx;
     overSound.currentTime = 0;
     overSound.play();
-    const x = this.mapWidth / 2 - 160;
-    const y = this.mapHeight / 2 - 20;
-
-    ctx.save();
-    ctx.strokeStyle = "#000";
-    ctx.lineWidth = 0.25;
-    ctx.fillStyle = "#fff";
-    ctx.font = "900 oblique 90px sans-serif";
-    ctx.fillText("GameOver", x, y);
-    ctx.strokeText("GameOver", x, y);
-    ctx.restore();
-
-    this.ShowHomeText(x + 5, y, "按下Enter键，返回首页");
+    ctx.drawImage(gameOverImg, GAME_OVER_RECT.x, GAME_OVER_RECT.y,
+      GAME_OVER_RECT.width, GAME_OVER_RECT.height);
+    drawPlayButton(ctx, RESTART_RECT);
   },
 
   ShowWin: function () {
     const ctx = state.ctx;
     winSound.currentTime = 0;
     winSound.play();
+    // No asset was supplied for this one, so it stays as drawn text. "You Win"
+    // is a status word, not an instruction.
     const x = this.mapWidth / 2 - 140;
     const y = this.mapHeight / 2 - 20;
     ctx.save();
@@ -383,22 +383,6 @@ FlappyBird.prototype = {
     ctx.fillText("You Win", x, y);
     ctx.strokeText("You Win", x, y);
     ctx.restore();
-    this.ShowHomeText(x - 20, y, "按下Enter键，返回首页");
-  },
-
-  ShowHomeText: function (x, y, str) {
-    const ctx = state.ctx;
-    ctx.save();
-    ctx.fillStyle = "rgba(128,0,0,0.3)";
-    ctx.fillRect(x, y + 15, 370, 40);
-    ctx.restore();
-    ctx.save();
-    ctx.strokeStyle = "#000";
-    ctx.lineWidth = 0.25;
-    ctx.fillStyle = "#fff";
-    ctx.font = "35px sans-serif";
-    ctx.fillText(str, x, y + 45);
-    ctx.strokeText(str, x, y + 45);
-    ctx.restore();
+    drawPlayButton(ctx, RESTART_RECT);
   },
 };
