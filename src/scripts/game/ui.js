@@ -50,3 +50,30 @@ export function hits(rect, pos) {
 export function breathe(timestamp) {
   return 1 + 0.04 * Math.sin(timestamp / 270);
 }
+
+// The score digits, 0-9. A number climbing at the top of the screen needs no
+// caption in any language, which suits a game that is not allowed to explain
+// itself.
+const DIGIT_W = 16;
+const DIGIT_H = 20;
+const digitImgs = Array.from({ length: 10 }, (_, i) => {
+  const img = new Image();
+  img.src = asset(`img/ui/number_score_0${i}.png`);
+  return img;
+});
+
+// Draws a non-negative integer from a left edge, at a whole-number scale so
+// the pixel art stays crisp. Left-aligned rather than centred: the bird flies
+// up and down a fixed column through the middle of the screen, so a centred
+// score sits directly in its path.
+export function drawDigits(ctx, value, x, y, scale = 2) {
+  const digits = String(Math.max(0, Math.floor(value)));
+  const w = DIGIT_W * scale;
+  const h = DIGIT_H * scale;
+  const gap = 2 * scale;
+  let cursor = Math.round(x);
+  for (const digit of digits) {
+    ctx.drawImage(digitImgs[Number(digit)], cursor, y, w, h);
+    cursor += w + gap;
+  }
+}

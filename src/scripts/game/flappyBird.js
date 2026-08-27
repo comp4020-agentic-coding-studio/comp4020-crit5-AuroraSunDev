@@ -5,6 +5,7 @@ import { Bird } from "./sprites/bird.js";
 import { Enemy } from "./sprites/enemy.js";
 import { Obstacle } from "./sprites/obstacle.js";
 import {
+  drawDigits,
   drawPlayButton,
   GAME_OVER_RECT,
   gameOverImg,
@@ -204,8 +205,8 @@ export class FlappyBird {
     ctx.lineWidth = 1;
     ctx.fillStyle = "#fff";
     ctx.font = "35px sans-serif";
-    ctx.fillText("Ammo: " + this.bulletLimitCount, 20, 105);
-    ctx.strokeText("Ammo: " + this.bulletLimitCount, 20, 105);
+    ctx.fillText("Ammo: " + this.bulletLimitCount, 24, 95);
+    ctx.strokeText("Ammo: " + this.bulletLimitCount, 24, 95);
     ctx.restore();
   }
 
@@ -260,15 +261,7 @@ export class FlappyBird {
   }
 
   ShowScore() {
-    const ctx = state.ctx;
-    ctx.save();
-    ctx.strokeStyle = "#000";
-    ctx.lineWidth = 1;
-    ctx.fillStyle = "#fff";
-    ctx.font = "35px sans-serif";
-    ctx.fillText("Score: " + this.score, 20, 50);
-    ctx.strokeText("Score: " + this.score, 20, 50);
-    ctx.restore();
+    drawDigits(state.ctx, this.score, 24, 20, 2);
   }
 
   // Collision detection: the bird against the ceiling, the floor, every enemy

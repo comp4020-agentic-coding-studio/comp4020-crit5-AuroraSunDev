@@ -38,7 +38,7 @@ let Speed; // ms between frames, per level
 export function initGame(canvas) {
   setCanvas(canvas);
 
-  startBG.src = asset("img/GameStartBG1.png");
+  startBG.src = asset("img/GameStartBG1.jpg");
   level1Img.src = levels[1].imgSrc[0].birdSrc;
   level2Img.src = levels[2].imgSrc[0].birdSrc;
   level3Img.src = levels[3].imgSrc[0].birdSrc;
@@ -409,15 +409,17 @@ function DrawGameLevel(i, img, x, y, levelStr, difficultyStr, scoreStr) {
   ctx.restore();
 }
 
+// Which levels have been cleared, kept in localStorage so the record survives
+// the reload that the restart button performs.
 function SaveLocal(i, flag) {
-  localStorage.setItem(i, flag);
+  localStorage.setItem(String(i), String(flag));
 }
 
+// Compares against "true" rather than returning the raw string: the stored
+// value is text, so a stored "false" is every bit as truthy as "true" and
+// would have shown a level as cleared when it wasn't.
 function FindLocal(i) {
-  if (localStorage.getItem(i) != undefined) {
-    return localStorage.getItem(i);
-  }
-  return null;
+  return localStorage.getItem(String(i)) === "true";
 }
 
 function HandleKeyDown(e) {
