@@ -105,6 +105,18 @@ enemy is ahead, in range and level with the shot. Ammo stays finite and stays
 on the HUD. The A key handler is gone: an undiscoverable control is what caused
 this.
 
+`fireRange` is 280 (was 420 — two thirds, on request). And firing has a
+**minimum** range now too (`minFireRange`, 80): an enemy that only lined up
+vertically once it had already drifted within a few pixels of the muzzle
+still got a shot before, which travelled its whole tiny distance and connected
+within the same frame or two — no bullet was ever visibly in flight, so the
+enemy just vanished as if the player hadn't fired at all. Below `minFireRange`
+the bird now holds its round and the enemy has to be dodged instead of shot.
+`enemyInFiringLine` takes `minRange` as its fourth argument, defaulting to 0
+so any caller that doesn't pass one keeps the old point-blank-included
+behaviour. Harness-confirmed on the real values: 20px ahead no longer fires,
+96px ahead still does, 476px ahead (past the new, shorter range) doesn't.
+
 **Collision is against outlines, not boxes.** The cactus is a tall irregular
 plant in a 90px sprite column; at its thin points only 34px is opaque, so more
 than half the box was empty air and the bird died with daylight showing.
@@ -114,6 +126,25 @@ the same measurement. No need to split any PNG — the alpha channel already say
 where the art is. A fixed inset would not work: the spikes do reach the sprite
 edge on some rows.
 
+**The bullet was the one hitbox not built this way, and it was the most
+oversized of all of them.** It had no `hitbox()` at all — the enemy collision
+test used the raw sprite object directly, at bullet.png's natural 58x24. But
+`bullet.png` has no transparent margin (its own alpha box is the full sheet),
+and `Bullet.draw()` renders it at two thirds scale — so the box a hit was
+tested against was 1.5x the size of what was actually on screen, in both
+directions, anchored at the same top-left corner. A hit registered up to a
+third of the bullet's own length past where the drawn pixels stopped, which is
+what "trigger range too large" meant here: alpha-trimming alone changes
+nothing for this specific PNG, since it has no padding to trim. `Bullet` now
+has a `hitbox()` matching the other sprites' pattern — `opaqueBox()` (a no-op
+here) then scaled by the same `2/3` `draw()` uses — and `CountScore` calls it
+instead of using the bullet object raw. The pre-fire `shot` rect `AutoFire()`
+builds for the range check is scaled the same way, so the vertical-alignment
+decision agrees with the box the fired round will actually be tested against;
+before, a round could pass a check built against a taller box than the one
+that ended up chasing the enemy. Confirmed on the real sprite: an enemy placed
+2px clear of the visible bullet no longer registers a hit (it did before).
+
 **The frame loop is rAF with delta time.** Every movement is scaled by `step`,
 the fraction of one original 30ms tick the frame covered, so frame rate never
 becomes game speed. Deltas are clamped at 100ms. The loop waits for the bird
@@ -121,15 +152,16 @@ and the first obstacle pair before running, because `CountScore` reads
 `obsList[0]` unguarded.
 
 **Difficulty lives in one `pacing` block per level** in `levels.js`, so the
-whole curve can be read in one place. Base gap 200px; floor 130px everywhere.
+whole curve can be read in one place. Floor 100px everywhere; base gap 200px
+for levels 1 and 4, 190px for levels 2 and 3 (which roll within it — below).
 
 | | world speed | press throw | narrow gaps | springing gaps | pair spacing |
 |---|---|---|---|---|---|
 | 1 | 2.0 | 8 / 3 | 1 (−40px) | 0 | 400 → 330 |
-| 2 | 2.4 | 8 / 3 | 2 (−48px) | 1 (−64px) | 420 → 320 |
-| 3 | 2.9 | 11 / 4.5 | 3 (−56px) | 2 (−70px) | 460 → 290 |
-| 4 | 2.9 | 11 / 4.5 | 2 (−56px) | 1 (−70px) | 460 → 290 |
-| endless | 2.9 | 11 / 4.5 | 15%→45% of pairs | 18%→60% of pairs | 400 → 240 |
+| 2 | 2.4 | 8 / 3 | 2 (−48px) | 3 (−25 to −65px) | 420 → 320 |
+| 3 | 2.9 | 11 / 4.5 | 3 (−56px) | 5 (−35 to −85px) | 460 → 290 |
+| 4 | 2.9 | 11 / 4.5 | 2 (−56px) | 1 (−40 to −110px) | 460 → 290 |
+| endless | 2.9 | 11 / 4.5 | 15%→45% of pairs | 18%→60% (−45 to −100px) | 400 → 240 |
 
 A *narrow* pair has a shorter gap from the moment it spawns; a *springing* pair
 comes in at full height and slams shut on the approach. Two exclusions, both
@@ -137,6 +169,39 @@ deliberate: **no level tricks its opening pair** (a trick before a plain gap
 just reads as a broken gap), and **no pair carrying an enemy is tricked** (two
 hazards at once is a wall, not a step up). A pick that lands on an enemy pair
 is not lost — it falls through to the next eligible pair.
+
+**Level 2 and 3's ordinary pairs roll their own opening.** Every level held
+its plain gap at a constant 200px — only the tricked pairs ever differed, so
+the difference between a trick and a plain gap was the only variation in the
+game. Levels 2 and 3 now roll every pair but the first uniformly between
+`ordinaryGapMin` and `gap` — **110 to 190px** — via `randomGap`. Levels 1 and 4
+keep the constant — they set no `ordinaryGapMin` at all, so `RollGap()` falls
+back to the old deterministic value for them, and for the endless run.
+
+The trick floor (`GAP_FLOOR`, **100**) sits *below* 110 on purpose. A trick
+subtracts from whatever the pair rolled, not from the base gap, so if the
+floor sat at or above the roll's own minimum, a narrow/closing trick applied
+to a low roll would clamp back up to the floor instead of cutting further —
+a "narrowed" pair ending up wider than a plain one beside it. Asserted
+directly: `shortenGap(ordinaryGapMin, narrowBy) < ordinaryGapMin` for both
+levels.
+
+**A springing pair's compression is itself a range, not one fixed depth.**
+`closeBy` used to be a single number subtracted from the spawn gap. That
+looked varied — the spawn gap was already random — but wasn't: `shortenGap`
+clamps at the floor, and for most of the spawn range `spawn − closeBy` landed
+below it, so nearly every closing pair ended at exactly `GAP_FLOOR` regardless
+of what it spawned at. "Sometimes a little, sometimes a lot" had collapsed to
+"always the same amount" — confirmed by testing it, and reproduced as a
+regression test (revert `rollCloseBy` to a fixed depth and two different rolls
+land on the identical final width: `expected 125 not to be 125`).
+`closeByMin`/`closeByMax` (level 2: 25–65, level 3: 35–85, level 4: 40–110,
+endless: 45–100) are now rolled per pair via `rollCloseBy`, so the depth
+varies independently of the spawn — a shallow roll on a wide spawn stays open,
+a deep roll on a narrow one still legitimately bottoms out at the floor, but
+the two no longer coincide on every pair. Harness output on the real code:
+level 3's closing pairs landed at 107, 141, 107, 100, 126 — four distinct
+widths in five, not one repeated number.
 
 **A trick nobody notices is not a difficulty step.** Both halves of that were
 true of the first version, and each had its own cause.
@@ -195,6 +260,21 @@ Four decisions inside it:
 **It has no losing.** Hitting something stops the run, and there was nothing to
 win, so there is no `GAME OVER`. The screen is the final score in the digit
 sprites at 5x, centred, and the same two buttons.
+
+**Restarting after a level ends goes back to the level tiles, not the title.**
+The play icon on Game Over / You Win, and Enter, both used to `location.reload()`,
+which always re-opens on the home screen — correct the first time, wrong the
+fifth: the player already chose a level once to get here, and making them
+choose the game itself again on every retry is the tax this change removes.
+Implemented as a one-shot `sessionStorage` flag (`desertbird:startAt`) rather
+than skipping the reload: a full reload is what already gives a clean reset of
+every module-level variable (`game`, `sound`, the loaded-image flags), and
+re-deriving that reset by hand risks missing one. `initGame()` reads and
+clears the flag on its very first line, so it can only ever act on the reload
+that set it — a later plain refresh, or the house icon on a two-button screen
+(which never sets it), still lands on the title. Verified end to end over CDP:
+set the flag, reload, screenshot — level tiles, thumbnails intact; plain
+reload — "Get Ready!" as before.
 
 ## Presentation
 
@@ -255,7 +335,7 @@ Carried forward as how this repo checks itself:
   to indices 7 and 8, and it is deleted rather than committed: a probe that
   ships is a page nobody maintains.
 
-Current state: `astro check` 0 errors / 0 warnings / 0 hints, 85 tests green.
+Current state: `astro check` 0 errors / 0 warnings / 0 hints, 96 tests green.
 
 ## Shipped
 
@@ -279,13 +359,22 @@ polish · `5eb2023` PROCESS.md · `be145ca` page and typography rework ·
    spawning code — but numbers are not feel, and every one of these is a
    judgement about feel: the press throw of 11 / 4.5, the new trick depths,
    whether 45px of travel reads as a slam or a glitch, whether 135px of runway
-   is enough to answer one, and whether level 3 at 290px spacing is hard or
-   unfair. **Play all three levels before the crit.**
+   is enough to answer one, whether level 3 at 290px spacing is hard or unfair,
+   whether a rolled-random ordinary gap (110-190px) reads as pleasant variety
+   or as an unfair pair indistinguishable from a trick, whether a springing
+   pair's now-varying final width (100-141px, per the harness) reads as
+   pleasantly unpredictable or as an inconsistent rule, whether holding fire
+   under 80px reads as the bird being cautious or as it inexplicably refusing
+   a point-blank kill, and whether the tightened bullet hitbox now feels fair
+   or feels like shots that visually connect are being denied — the fix
+   removed a third of unearned reach, not added any. **Play all three levels
+   before the crit.**
 4. **Level 4 has never been reached end to end.** Auto-fire makes the
    three-kill easter egg possible again, but nobody has played through to it.
-   Note that level 3's enemy every 2 pairs means its five tricks all defer past
-   pairs 2, 4 and 6 and land in the back half of the run — intended by the
-   fall-through rule, but worth watching for bunching.
+   Note that level 3 now plans 8 tricks (3 narrow, 5 closing) into a 15-pair
+   run with enemies every 2 pairs — the harness shows them landing at pair
+   indices 1, 2, 4, 5, 7, 8, 10, 11, which is dense enough in the first half
+   to be worth a specific look for bunching.
 5. **The endless run has never been played.** Its escalation is asserted at 60
    pairs by the harness and by the suite, and its two-button screens have been
    rendered and looked at, but nobody has resumed into it from a real win.
@@ -296,3 +385,7 @@ polish · `5eb2023` PROCESS.md · `be145ca` page and typography rework ·
    and a stranger reaching an ending within five minutes. These are not
    fakeable by a test — confirm with an actual first-time player before the
    crit.
+7. **Restart-to-select was verified over CDP, not by an actual tap.** The
+   mechanism (the `sessionStorage` flag, its single read on load) is confirmed
+   working; a real player clicking the play icon on a real Game Over screen
+   has not been watched.

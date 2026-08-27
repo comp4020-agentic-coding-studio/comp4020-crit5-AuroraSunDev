@@ -33,6 +33,46 @@ const levelXY = [
   { x: 0, y: 0 },
 ];
 
+// Where the next load should land: read once at startup, then forgotten, so
+// it can only ever act on the reload that set it. A restart after a level
+// ends goes back to the level tiles rather than all the way to the title —
+// the player already chose a level once, and Game Over is not the moment to
+// make them choose the game itself again. The very first visit, and the
+// house icon on a two-button screen, are deliberately not this path, so
+// they still land on the title.
+const START_AT_KEY = "desertbird:startAt";
+let startAt = null;
+let bgReady = false;
+let levelBgReady = false;
+
+function ReloadToSelect() {
+  try {
+    sessionStorage.setItem(START_AT_KEY, "select");
+  } catch {
+    // Storage can be unavailable (private mode, a locked-down browser); the
+    // worst outcome is landing on the title, which is what happened before.
+  }
+  location.reload();
+}
+
+// Fires once both the images the select screen itself draws are in, and only
+// if a restart asked for this screen specifically. Gated on two images
+// rather than one: the level thumbnails always have a running start (the
+// player saw them once already, to have reached Game Over at all), but this
+// screen also draws the desert title background and the tile chrome, so both
+// have to be ready before painting over what CreateMap's own background load
+// might otherwise still have on screen for a frame.
+function MaybeEnterSelectDirectly() {
+  if (startAt !== "select" || !bgReady || !levelBgReady) {
+    return;
+  }
+  startAt = null;
+  state.isSelect = true;
+  state.isHome = false;
+  state.ctx.clearRect(0, 0, state.canvas.width, state.canvas.height);
+  DrawSelect();
+}
+
 const game = new FlappyBird();
 // Whether this level issues ammo at all, and so whether to draw the count.
 let levelHasAmmo = false;
@@ -44,6 +84,15 @@ let choiceScreen = null;
 
 export function initGame(canvas) {
   setCanvas(canvas);
+
+  // Single-use: whatever this load finds, no later reload should see it
+  // again unless something sets it again first.
+  try {
+    startAt = sessionStorage.getItem(START_AT_KEY);
+    sessionStorage.removeItem(START_AT_KEY);
+  } catch {
+    startAt = null;
+  }
 
   startBG.src = asset("img/GameStartBG1.jpg");
   level1Img.src = levels[1].imgSrc[0].birdSrc;
@@ -59,12 +108,19 @@ export function initGame(canvas) {
   levelXY[2].y = levelXY[0].y;
 
   startBG.onload = function () {
-    if (state.isHome) {
+    bgReady = true;
+    if (startAt === "select") {
+      MaybeEnterSelectDirectly();
+    } else if (state.isHome) {
       RunHomeLoop();
     }
   };
   startBG.onerror = function () {
     console.log("failed to load a game image");
+  };
+  levelBGImg.onload = function () {
+    levelBgReady = true;
+    MaybeEnterSelectDirectly();
   };
 
   canvas.onmousedown = function (e) {
@@ -138,9 +194,11 @@ function HandlePrimaryTap() {
   // An end screen: the same play icon restarts. Without this a mouse- or
   // touch-only player who reaches Game Over can only get a second go by
   // knowing about the Enter key, which is an instruction nobody gave them.
+  // It lands on the level tiles, not the title: the player already chose a
+  // level once to get here.
   if ((game.gameOver || game.gameWin) && mousePos != null) {
     if (hits(RESTART_RECT, mousePos)) {
-      location.reload();
+      ReloadToSelect();
     }
   }
 }
@@ -481,7 +539,7 @@ function FindLocal(i) {
 function HandleKeyPress(e) {
   if (e.keyCode == "13" || e.keyCode == "108") {
     if (game.gameOver || game.gameWin) {
-      location.reload();
+      ReloadToSelect();
     }
   }
 }

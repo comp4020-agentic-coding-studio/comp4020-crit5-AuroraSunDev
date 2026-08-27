@@ -54,7 +54,12 @@ export function rectHitsMask(rect, mask) {
 // No trick, and no amount of progress, takes a pair's gap below this. The
 // bird is 48px tall in levels 2-4 and 64 in level 1, so a gap this size is
 // threadable but leaves nothing to drift with.
-export const GAP_FLOOR = 130;
+//
+// Set below `ordinaryGapMin` (the lowest an untricked pair can roll to) on
+// purpose: a trick has to make a real cut off whatever the pair rolled, and
+// if the floor sat above that roll the cut would be clamped back up instead
+// — a "narrowed" pair ending up wider than the plain one next to it.
+export const GAP_FLOOR = 100;
 
 // A quantity that tightens as a run goes on and then holds. The gap inside an
 // obstacle pair and the distance between consecutive pairs both move this way,
@@ -91,6 +96,33 @@ export function pairSpacing(pacing, progress) {
 // A trick shortens a gap by `by`, but never past the floor.
 export function shortenGap(gap, by) {
   return Math.max(GAP_FLOOR, gap - by);
+}
+
+// The opening an ordinary (non-tricked) pair spawns with, in levels 2 and 3.
+// Every pair but the first rolls its own width uniformly between
+// `ordinaryGapMin` and the level's base gap, rather than spawning at that
+// base gap every time — a metronome even before any trick is layered on.
+// `random` is injectable so the roll can be tested.
+export function randomGap(pacing, random = Math.random) {
+  const span = pacing.gap - pacing.ordinaryGapMin;
+  return pacing.ordinaryGapMin + random() * span;
+}
+
+// How much a springing pair's gap shrinks, in px — rolled between
+// `closeByMin` and `closeByMax` rather than a single fixed depth.
+//
+// A fixed depth subtracted from an already-random spawn gap sounds varied but
+// mostly isn't: `shortenGap` clamps at the floor, and for most of the spawn
+// range `spawn - fixedDepth` landed below it, so nearly every closing pair
+// ended at exactly `GAP_FLOOR` regardless of what it rolled — "sometimes a
+// little, sometimes a lot" collapsing to "always the same amount". Rolling
+// the depth too spreads the *final* width out again: a shallow roll on a wide
+// spawn stays open, a deep roll on a narrow one still bottoms out (correctly
+// — "compress a lot" should sometimes mean the floor), but the two no longer
+// coincide on every pair.
+export function rollCloseBy(pacing, random = Math.random) {
+  const span = pacing.closeByMax - pacing.closeByMin;
+  return pacing.closeByMin + random() * span;
 }
 
 // How long to wait before spawning the next pair, for a spacing given in
@@ -224,15 +256,27 @@ export function nextPairTrick(
 // a miss.
 //
 // A shot only ever travels right, at a fixed height, so an enemy qualifies
-// only if it is ahead of the muzzle, inside `range`, and already vertically
-// level with the shot. `shot` and each enemy are {x, y, width, height}.
-export function enemyInFiringLine(shot, enemies, range) {
-  return enemies.some(
-    (enemy) =>
+// only if it is ahead of the muzzle, at least `minRange` and less than `range`
+// away, and already vertically level with the shot. `shot` and each enemy are
+// {x, y, width, height}.
+//
+// `minRange` exists because "ahead" alone let this fire at point-blank range:
+// an enemy that only lines up vertically once it has already drifted very
+// close to the muzzle got a shot that spawned, travelled its whole distance
+// and connected within the same frame or two — the bullet was never visibly
+// in flight, so a player saw the enemy vanish with no shot fired at all.
+// Below `minRange` the bird holds its round rather than fire something
+// unwatchable; the enemy has to be dealt with by dodging instead.
+export function enemyInFiringLine(shot, enemies, range, minRange = 0) {
+  return enemies.some((enemy) => {
+    const ahead = enemy.x - shot.x;
+    return (
       !enemy.defeat &&
-      enemy.x > shot.x &&
-      enemy.x - shot.x < range &&
+      ahead > 0 &&
+      ahead >= minRange &&
+      ahead < range &&
       shot.y < enemy.y + enemy.height &&
-      shot.y + shot.height > enemy.y,
-  );
+      shot.y + shot.height > enemy.y
+    );
+  });
 }

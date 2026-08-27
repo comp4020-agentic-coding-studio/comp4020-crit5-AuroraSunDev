@@ -10,8 +10,10 @@ import {
   pairIntervalMs,
   pairSpacing,
   pickPairIndices,
+  randomGap,
   rectHitsMask,
   rectsOverlap,
+  rollCloseBy,
   shortenGap,
   snapChance,
   snapProgress,
@@ -156,6 +158,31 @@ describe("enemyInFiringLine", () => {
     // the shot would pass under it and the round would be gone for nothing.
     expect(enemyInFiringLine(shot, [enemy(600, 252)], RANGE)).toBe(false);
   });
+
+  // An enemy that only lines up vertically once it has already drifted very
+  // close to the muzzle used to still get a shot: it would spawn, cross the
+  // whole (tiny) distance and connect within the same frame or two, so the
+  // player never saw a bullet in flight — the enemy just vanished. `minRange`
+  // withholds the round instead of firing something unwatchable.
+  const MIN_RANGE = 80;
+
+  it("holds fire at point-blank range, below minRange", () => {
+    expect(enemyInFiringLine(shot, [enemy(444, 280)], RANGE, MIN_RANGE)).toBe(
+      false,
+    ); // 20px ahead
+  });
+
+  it("fires once the enemy clears minRange", () => {
+    expect(enemyInFiringLine(shot, [enemy(520, 280)], RANGE, MIN_RANGE)).toBe(
+      true,
+    ); // 96px ahead
+  });
+
+  it("still fires at the old default when minRange is omitted", () => {
+    // No caller passes a bare 20px-ahead enemy today, but the default has to
+    // stay the pre-minRange behaviour for anything that doesn't opt in.
+    expect(enemyInFiringLine(shot, [enemy(444, 280)], RANGE)).toBe(true);
+  });
 });
 
 // The cactus is a tall irregular plant inside a 90px-wide sprite column, and
@@ -298,12 +325,63 @@ describe("level pacing rises across levels 1 to 3", () => {
     expect(one.firstRandom).toBe(2);
   });
 
-  it("never narrows a gap to something impossible", () => {
+  it("never narrows a gap below the floor, and the floor clears the tallest bird", () => {
     for (const key of [1, 2, 3, 4] as const) {
       const p = levels[key].pacing;
-      // The bird is at most 64 tall, in level 1.
-      expect(shortenGap(p.gap, p.narrowBy)).toBeGreaterThan(100);
-      expect(shortenGap(p.gap, p.closeBy)).toBeGreaterThan(100);
+      expect(shortenGap(p.gap, p.narrowBy)).toBeGreaterThanOrEqual(GAP_FLOOR);
+      // closeByMax is the deepest a springing pair can roll; even that stays
+      // clamped at the floor rather than passing through it.
+      expect(shortenGap(p.gap, p.closeByMax)).toBeGreaterThanOrEqual(GAP_FLOOR);
+    }
+    // The bird is at most 64 tall, in level 1.
+    expect(GAP_FLOOR).toBeGreaterThan(64);
+  });
+});
+
+// A fixed 200px on every pair but the tricked ones read as a metronome:
+// level 2 and level 3 now roll a fresh opening per pair instead, between
+// `ordinaryGapMin` and the level's base gap. Levels 1 and 4 keep the old
+// constant — they set no `ordinaryGapMin` at all.
+describe("randomGap", () => {
+  const seeded = (values: number[]) => {
+    let i = 0;
+    return () => values[i++ % values.length];
+  };
+
+  it("stays inside its own range, at both ends and in between", () => {
+    const pacing = { gap: 200, ordinaryGapMin: 125 };
+    expect(randomGap(pacing, seeded([0]))).toBe(125);
+    expect(randomGap(pacing, seeded([0.9999]))).toBeLessThan(200);
+    expect(randomGap(pacing, seeded([0.5]))).toBeCloseTo(162.5);
+  });
+
+  it("only levels 2 and 3 roll it — 1 and 4 keep a constant opening", () => {
+    expect("ordinaryGapMin" in levels[1].pacing).toBe(false);
+    expect("ordinaryGapMin" in levels[2].pacing).toBe(true);
+    expect("ordinaryGapMin" in levels[3].pacing).toBe(true);
+    expect("ordinaryGapMin" in levels[4].pacing).toBe(false);
+  });
+
+  it("never rolls below the trick floor, so a trick always cuts further", () => {
+    // If the roll's own floor sat at or below GAP_FLOOR, a trick applied to
+    // the lowest rolls would clamp back up to the floor instead of cutting
+    // — a "narrowed" pair ending up wider than the plain one beside it.
+    for (const key of [2, 3] as const) {
+      expect(levels[key].pacing.ordinaryGapMin).toBeGreaterThan(GAP_FLOOR);
+    }
+  });
+
+  it("a trick still cuts a real amount off even the lowest roll", () => {
+    for (const key of [2, 3] as const) {
+      const p = levels[key].pacing;
+      expect(shortenGap(p.ordinaryGapMin, p.narrowBy)).toBeLessThan(
+        p.ordinaryGapMin,
+      );
+      // closeByMin is the *shallowest* the closing trick ever rolls — even
+      // that still has to cut something off the lowest possible spawn.
+      expect(shortenGap(p.ordinaryGapMin, p.closeByMin)).toBeLessThan(
+        p.ordinaryGapMin,
+      );
     }
   });
 });
@@ -322,10 +400,10 @@ describe("a gap trick is deep enough to see", () => {
   it("makes a pair that springs shut bite harder than one born short", () => {
     // A short gap can be read from across the screen and lined up against; one
     // that closes on the approach cannot, so it has to cost more to be worth
-    // the surprise.
+    // the surprise. Compared at its deepest roll, since the depth now varies.
     for (const key of [2, 3, 4] as const) {
       const p = levels[key].pacing;
-      expect(p.closeBy).toBeGreaterThan(p.narrowBy);
+      expect(p.closeByMax).toBeGreaterThan(p.narrowBy);
     }
   });
 
@@ -336,17 +414,72 @@ describe("a gap trick is deep enough to see", () => {
   });
 });
 
+// A single fixed depth subtracted from an already-random spawn mostly hit the
+// floor regardless of what it rolled: for most of a level's spawn range,
+// spawn - depth landed below GAP_FLOOR, so nearly every closing pair ended at
+// exactly the same final width, no matter how far apart their spawns were.
+// Rolling the depth itself is the fix.
+describe("rollCloseBy", () => {
+  const seeded = (values: number[]) => {
+    let i = 0;
+    return () => values[i++ % values.length];
+  };
+
+  it("stays inside its own range, at both ends", () => {
+    const pacing = { closeByMin: 25, closeByMax: 65 };
+    expect(rollCloseBy(pacing, seeded([0]))).toBe(25);
+    expect(rollCloseBy(pacing, seeded([1]))).toBe(65);
+  });
+
+  it("two draws on the same spawn can end at two different final widths", () => {
+    // This is the bug, made concrete: before, closeBy was one fixed number,
+    // so a given spawn always closed to the same final width. Two different
+    // rolls of the depth must be able to produce two different results.
+    const pacing = { closeByMin: 25, closeByMax: 65 };
+    const spawn = 190;
+    const shallow = shortenGap(spawn, rollCloseBy(pacing, seeded([0])));
+    const deep = shortenGap(spawn, rollCloseBy(pacing, seeded([1])));
+    expect(shallow).not.toBe(deep);
+    expect(deep).toBeLessThan(shallow);
+  });
+
+  it("a deep-enough roll still legitimately bottoms out at the floor", () => {
+    // "Compress a lot" should sometimes mean the floor — the bug was that it
+    // ALWAYS did, not that it never should.
+    const pacing = { closeByMin: 25, closeByMax: 65 };
+    expect(shortenGap(80, rollCloseBy(pacing, seeded([1])))).toBe(GAP_FLOOR);
+  });
+});
+
 // The pair that comes in at a plain height and then springs shut once the bird
-// is committed. Level 1 never does it; level 2 does it once a run and level 3
-// twice, which is the whole of the specification for this one.
+// is committed. Level 1 never does it; level 2 does it three times a run and
+// level 3 five, before the win screen — after which the endless run rolls it
+// by chance rather than by a count, because there is no run length left to
+// count against.
 describe("the pair that springs shut", () => {
   it("is not in level 1 at all", () => {
     expect(levels[1].pacing.closingGaps).toBe(0);
   });
 
-  it("happens once in level 2 and twice in level 3", () => {
-    expect(levels[2].pacing.closingGaps).toBe(1);
-    expect(levels[3].pacing.closingGaps).toBe(2);
+  it("happens three times in level 2 and five in level 3", () => {
+    expect(levels[2].pacing.closingGaps).toBe(3);
+    expect(levels[3].pacing.closingGaps).toBe(5);
+  });
+
+  it("never plans more tricks than a level's own window can hold", () => {
+    // The window a level's tricks are drawn from is bounded by how many
+    // pairs the run can actually reach (trickSpan) — raising closingGaps
+    // without checking this is exactly how a trick used to go unplayed.
+    for (const key of [1, 2, 3, 4] as const) {
+      const level = levels[key];
+      const span = trickSpan(
+        level.num[0].scoreC,
+        level.num[0].enemyC,
+        level.pacing.firstRandom,
+      );
+      const total = level.pacing.narrowGaps + level.pacing.closingGaps;
+      expect(total).toBeLessThanOrEqual(span);
+    }
   });
 
   // The numbers the game actually runs with. The bird never moves
@@ -509,7 +642,7 @@ describe("the endless run", () => {
 
   it("keeps every gap flyable however long the run goes on", () => {
     expect(pairGap(endless, 10_000)).toBe(endless.minGap);
-    expect(shortenGap(pairGap(endless, 10_000), endless.closeBy)).toBe(
+    expect(shortenGap(pairGap(endless, 10_000), endless.closeByMax)).toBe(
       GAP_FLOOR,
     );
     // The bird is 48 tall in level 3's skin, and this is the tightest the run

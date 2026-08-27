@@ -8,8 +8,10 @@ import {
   pairIntervalMs,
   pairSpacing,
   pickPairIndices,
+  randomGap,
   rectHitsMask,
   rectsOverlap,
+  rollCloseBy,
   shortenGap,
   snapChance,
   snapProgress,
@@ -17,7 +19,7 @@ import {
 } from "./rules.js";
 import { state } from "./state.js";
 import { Bird } from "./sprites/bird.js";
-import { Bullet } from "./sprites/bullet.js";
+import { Bullet, DISPLAY_SCALE as BULLET_SCALE } from "./sprites/bullet.js";
 import { Enemy } from "./sprites/enemy.js";
 import { Obstacle } from "./sprites/obstacle.js";
 import {
@@ -86,7 +88,13 @@ export class FlappyBird {
     this.downSpeed = 3;
 
     this.bulletSpeed = 10;
-    this.fireRange = 420; // how far ahead auto-fire will engage
+    this.fireRange = 280; // how far ahead auto-fire will engage — 2/3 of 420
+    // Below this, auto-fire holds its round rather than take a shot with no
+    // travel time to see: an enemy that only lines up with the shot once it
+    // has already drifted this close got a bullet that spawned, crossed the
+    // whole distance and connected within the same frame or two — the enemy
+    // simply vanished, with nothing visibly fired at it.
+    this.minFireRange = 80;
 
     this.level = 100; // ground height
 
@@ -123,6 +131,18 @@ export class FlappyBird {
   // numbered level; closing steadily through the endless run.
   CurrentGap() {
     return pairGap(this.pacing, this.Progress());
+  }
+
+  // As above, but rolled fresh for levels that set `ordinaryGapMin` (2 and
+  // 3): every pair but the first — which CreateMap builds straight from
+  // CurrentGap() before this can run — gets its own width instead of the
+  // same constant every time. Levels 1 and 4, and the endless run, have no
+  // `ordinaryGapMin` and fall back to the deterministic value unchanged.
+  RollGap() {
+    if (this.pacing.ordinaryGapMin == null) {
+      return this.CurrentGap();
+    }
+    return randomGap(this.pacing);
   }
 
   // How long until the next pair, right now. Recomputed every frame rather
@@ -331,7 +351,7 @@ export class FlappyBird {
       this.enemyLimitCount > 0 &&
       this.enemyCount + 1 >= this.enemyIntervalCount;
 
-    let gap = this.CurrentGap();
+    let gap = this.RollGap();
     let snapBy = 0;
     const trick = this.PickTrick(carriesEnemy);
     if (trick === "narrow") {
@@ -340,9 +360,13 @@ export class FlappyBird {
     } else if (trick === "closing") {
       this.closingAt.shift();
       // The pair spawns at the full gap and loses this much on the approach.
-      // Clamped the same way a narrow gap is, so a late endless pair whose
-      // ordinary gap is already tight cannot snap shut to nothing.
-      snapBy = gap - shortenGap(gap, this.pacing.closeBy);
+      // The depth itself is rolled — a fixed depth mostly clamped to the same
+      // floor regardless of what the pair spawned at, so nearly every closing
+      // pair ended at the identical final width. Clamped the same way a
+      // narrow gap is, so a late endless pair whose ordinary gap is already
+      // tight cannot snap shut to nothing.
+      const depth = rollCloseBy(this.pacing);
+      snapBy = gap - shortenGap(gap, depth);
     }
 
     const h = Math.floor(
@@ -423,11 +447,15 @@ export class FlappyBird {
 
     const muzzleX = this.bird.x + this.bird.width;
     const muzzleY = this.bird.y + this.bird.height / 2;
+    // Scaled down to match the bullet that is actually about to fly — the
+    // vertical-alignment check below has to agree with the collision test
+    // the fired round will face, or a round can pass a check built against a
+    // taller box than the one that ends up chasing the enemy.
     const shot = {
       x: muzzleX,
       y: muzzleY,
-      width: this.bullet.width,
-      height: this.bullet.height,
+      width: this.bullet.width * BULLET_SCALE,
+      height: this.bullet.height * BULLET_SCALE,
     };
 
     // The decision itself lives in rules.js, where it can be tested without a
@@ -437,6 +465,7 @@ export class FlappyBird {
         shot,
         this.enemyList.map((enemy) => enemy.hitbox()),
         this.fireRange,
+        this.minFireRange,
       )) {
       return;
     }
@@ -491,10 +520,15 @@ export class FlappyBird {
     // A bullet that reaches an enemy destroys it and scores a point. Same
     // rectangle test as the bird's collisions — this was the last copy of the
     // four-corner version, and it had the same blind spot.
+    //
+    // `bullet.hitbox()`, not the bullet itself: the sprite is drawn at two
+    // thirds of its natural size, and nothing scaled the collision box to
+    // match, so a hit used to register up to a third of the bullet's own
+    // length past where the drawn pixels actually stopped.
     const bullet = this.bulletList[0];
     if (this.spaceTouch && bullet != null) {
       const hit = this.enemyList.findIndex((enemy) =>
-        rectsOverlap(bullet, enemy.hitbox()),
+        rectsOverlap(bullet.hitbox(), enemy.hitbox()),
       );
       if (hit !== -1) {
         this.score += 1;

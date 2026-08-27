@@ -11,12 +11,18 @@ import { asset } from "./paths.js";
 //   obsSpeed    how fast the world comes at you
 //   upSpeed /   how far one press moves the bird — larger values make the
 //   downSpeed   bird harder to hold steady, not just faster
-//   gap         the opening in an ordinary pair, in px
+//   gap         the opening in an ordinary pair, in px — the top of the
+//               range once `ordinaryGapMin` is set, otherwise a constant
 //   gapPerPoint how much that opening loses per point, floored at minGap;
 //               zero for a numbered level, where only the spacing tightens
+//   ordinaryGapMin  if set, every pair but the first (levels 2 and 3 only)
+//               rolls its own opening between this and `gap`, rather than
+//               spawning at a constant width every time
 //   narrowGaps  how many pairs spawn already short, by narrowBy
 //   closingGaps how many pairs spawn at full height and then snap shut, by
-//               closeBy, once the bird is close enough to have to react
+//               somewhere between closeByMin and closeByMax — rolled per
+//               pair rather than a single depth, once the bird is close
+//               enough to have to react
 //   spacing     px between one pair and the next at score 0, losing
 //   spacingPerPoint per point down to minSpacing — this is the obstacle
 //               density, and it rises for the whole level rather than being
@@ -52,7 +58,8 @@ export const levels = {
       narrowGaps: 1,
       narrowBy: 40,
       closingGaps: 0,
-      closeBy: 0,
+      closeByMin: 0,
+      closeByMax: 0,
       spacing: 400,
       spacingPerPoint: 12,
       minSpacing: 330,
@@ -75,13 +82,15 @@ export const levels = {
       obsSpeed: 2.4,
       upSpeed: 8,
       downSpeed: 3,
-      gap: 200,
+      gap: 190,
       gapPerPoint: 0,
-      minGap: 200,
+      minGap: 190,
+      ordinaryGapMin: 110,
       narrowGaps: 2,
       narrowBy: 48,
-      closingGaps: 1,
-      closeBy: 64,
+      closingGaps: 3,
+      closeByMin: 25,
+      closeByMax: 65,
       spacing: 420,
       spacingPerPoint: 10,
       minSpacing: 320,
@@ -109,13 +118,18 @@ export const levels = {
       // a line takes finer timing rather than just faster reactions.
       upSpeed: 11,
       downSpeed: 4.5,
-      gap: 200,
+      gap: 190,
       gapPerPoint: 0,
-      minGap: 200,
+      minGap: 190,
+      ordinaryGapMin: 110,
       narrowGaps: 3,
       narrowBy: 56,
-      closingGaps: 2,
-      closeBy: 70,
+      // Five before the win, and however many the run wants after it: the
+      // endless block below rolls this trick by chance rather than by count,
+      // so there is nothing left to cap once the target score falls away.
+      closingGaps: 5,
+      closeByMin: 35,
+      closeByMax: 85,
       spacing: 460,
       spacingPerPoint: 12,
       minSpacing: 290,
@@ -144,7 +158,8 @@ export const levels = {
       narrowGaps: 2,
       narrowBy: 56,
       closingGaps: 1,
-      closeBy: 70,
+      closeByMin: 40,
+      closeByMax: 110,
       spacing: 460,
       spacingPerPoint: 12,
       minSpacing: 290,
@@ -180,7 +195,8 @@ export const endless = {
   minGap: 160,
 
   narrowBy: 56,
-  closeBy: 70,
+  closeByMin: 45,
+  closeByMax: 100,
 
   spacing: 400,
   spacingPerPoint: 10,
