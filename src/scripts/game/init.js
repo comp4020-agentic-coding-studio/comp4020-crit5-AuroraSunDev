@@ -63,34 +63,67 @@ export function initGame(canvas) {
   };
 
   canvas.onmousedown = function (e) {
-    game.touch = true; // hold to fly up
-    if (!state.isPlay) {
-      mousePos = GetMousePos(e);
-    }
+    PointerDown(e.clientX, e.clientY);
   };
-  canvas.onmouseup = function () {
-    game.touch = false; // release to fall
-  };
+  canvas.onmouseup = PointerUp;
+  canvas.onclick = HandlePrimaryTap;
 
-  canvas.onclick = function () {
-    if (!state.isSelect && state.isHome) {
-      HomeClick();
-    }
-    if (!state.isPlay && state.isSelect && mousePos != null) {
-      Select();
-    }
-    // An end screen: the same play icon restarts. Without this a mouse-only
-    // player who reaches Game Over can only get a second go by knowing about
-    // the Enter key, which is an instruction nobody is allowed to give them.
-    if ((game.gameOver || game.gameWin) && mousePos != null) {
-      if (hits(RESTART_RECT, mousePos)) {
-        location.reload();
-      }
-    }
-  };
+  // Touch mirrors the mouse. touchstart is passive because `touch-action:
+  // none` in the stylesheet already stops the browser scrolling or zooming;
+  // touchend is not, because it has to suppress the synthetic click that
+  // would otherwise run HandlePrimaryTap a second time.
+  canvas.addEventListener(
+    "touchstart",
+    function (e) {
+      const touch = e.changedTouches[0];
+      PointerDown(touch.clientX, touch.clientY);
+    },
+    { passive: true },
+  );
+  canvas.addEventListener(
+    "touchend",
+    function (e) {
+      e.preventDefault();
+      PointerUp();
+      HandlePrimaryTap();
+    },
+    { passive: false },
+  );
+  canvas.addEventListener("touchcancel", PointerUp, { passive: true });
 
   window.addEventListener("keypress", HandleKeyPress, false);
   window.addEventListener("keydown", HandleKeyDown, false);
+}
+
+// Press and release drive the bird: held means climb, released means fall.
+function PointerDown(clientX, clientY) {
+  game.touch = true;
+  if (!state.isPlay) {
+    mousePos = GetPointerPos(clientX, clientY);
+  }
+}
+
+function PointerUp() {
+  game.touch = false;
+}
+
+// The one place a tap is acted on, shared by mouse click and touchend so the
+// two input paths can never drift apart.
+function HandlePrimaryTap() {
+  if (!state.isSelect && state.isHome) {
+    HomeClick();
+  }
+  if (!state.isPlay && state.isSelect && mousePos != null) {
+    Select();
+  }
+  // An end screen: the same play icon restarts. Without this a mouse- or
+  // touch-only player who reaches Game Over can only get a second go by
+  // knowing about the Enter key, which is an instruction nobody gave them.
+  if ((game.gameOver || game.gameWin) && mousePos != null) {
+    if (hits(RESTART_RECT, mousePos)) {
+      location.reload();
+    }
+  }
 }
 
 // Apply a level's data to the running game.
@@ -156,11 +189,17 @@ function RunGame(speed) {
   }, game.obsInterval);
 }
 
-function GetMousePos(e) {
-  const rect = state.canvas.getBoundingClientRect();
+// The canvas is displayed at whatever size fits the viewport, but every
+// hit-test in this file is written against the fixed 800x600 drawing buffer.
+// Converting here is what keeps a tap landing where it looks like it landed;
+// without the scale factor the buttons quietly stop responding as soon as the
+// display size differs from 800x600.
+function GetPointerPos(clientX, clientY) {
+  const canvas = state.canvas;
+  const rect = canvas.getBoundingClientRect();
   return {
-    x: e.clientX - rect.left,
-    y: e.clientY - rect.top,
+    x: (clientX - rect.left) * (canvas.width / rect.width),
+    y: (clientY - rect.top) * (canvas.height / rect.height),
   };
 }
 
