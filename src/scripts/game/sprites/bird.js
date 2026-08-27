@@ -1,3 +1,5 @@
+import { opaqueBox } from "../mask.js";
+
 // The player's bird. Its spritesheet holds three frames side by side.
 export class Bird {
   constructor(x, y, image) {
@@ -6,6 +8,22 @@ export class Bird {
     this.width = image.width / 3;
     this.height = image.height;
     this.image = image;
+  }
+
+  // The bird's own frame carries a few pixels of transparent margin, so the
+  // box overstates it too. Measured from the first frame: the three differ by
+  // a pixel or two, and erring small is erring in the player's favour.
+  hitbox() {
+    const box = opaqueBox(this.image, 0, 0, this.width, this.height);
+    if (box == null) {
+      return { x: this.x, y: this.y, width: this.width, height: this.height };
+    }
+    return {
+      x: this.x + box.x,
+      y: this.y + box.y,
+      width: box.width,
+      height: box.height,
+    };
   }
 
   // `state` is the bird's flight state, one frame each: rising, falling,

@@ -137,6 +137,16 @@ function InitScript(stage) {
 
   levelHasAmmo = stage.num[0].bulletC > 0;
   Speed = stage.IntervalSpeed[0].ITVSpeed;
+
+  // Difficulty: how fast the world moves, how far one press throws the bird,
+  // and which pairs get a shortened or closing gap.
+  const pacing = stage.pacing;
+  game.obsSpeed = pacing.obsSpeed;
+  game.upSpeed = pacing.upSpeed;
+  game.downSpeed = pacing.downSpeed;
+  game.narrowBy = pacing.narrowBy;
+  game.firstRandomPair = pacing.firstRandom;
+  game.PlanSpecialPairs(pacing, stage.num[0].scoreC);
 }
 
 // The loop runs on requestAnimationFrame rather than a fixed setInterval, so
@@ -192,6 +202,7 @@ function RunGame(speed) {
 
     // Clear, then draw, then update.
     game.ClearScreen();
+    game.UpdateClosingPairs();
     game.DrawObs(step);
     if (game.enemyLimitCount >= 0) {
       game.DrawEnemy(step);

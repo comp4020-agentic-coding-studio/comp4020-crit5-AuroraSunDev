@@ -1,3 +1,5 @@
+import { opaqueBox } from "../mask.js";
+
 // A flying enemy. Two frames side by side in the spritesheet.
 export class Enemy {
   constructor(x, y, image) {
@@ -12,6 +14,22 @@ export class Enemy {
     // initialised this, so `this.ticks++` was NaN, the comparison below was
     // never true, and the enemy sat on frame 0 for the whole game.
     this.ticks = 0;
+  }
+
+  // This sprite is mostly empty air: 10px of its 32 are transparent on the
+  // left and 8 on the right, so the box is nearly twice the creature.
+  hitbox() {
+    const box = opaqueBox(this.image, 0, 0, this.width, this.height);
+    if (box == null) {
+      return { x: this.x, y: this.y, width: this.width, height: this.height };
+    }
+    return {
+      x: this.x + box.x,
+      y: this.y + box.y,
+      width: box.width,
+      height: box.height,
+      defeat: this.defeat,
+    };
   }
 
   // Unlike the obstacles, this one moves by translating the canvas.

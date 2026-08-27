@@ -1,5 +1,11 @@
 import { asset } from "./paths.js";
-import { enemyInFiringLine, rectsOverlap } from "./rules.js";
+import {
+  enemyInFiringLine,
+  nextPairTrick,
+  pickPairIndices,
+  rectHitsMask,
+  rectsOverlap,
+} from "./rules.js";
 import { state } from "./state.js";
 import { Bird } from "./sprites/bird.js";
 import { Bullet } from "./sprites/bullet.js";
@@ -73,6 +79,50 @@ export class FlappyBird {
     this.fireRange = 420; // how far ahead auto-fire will engage
 
     this.level = 100; // ground height
+
+    // Difficulty pacing, replaced per level from the table's `pacing` block.
+    this.narrowBy = 20;
+    this.firstRandomPair = 1;
+    this.pairIndex = 0;
+    this.narrowAt = [];
+    this.closingAt = [];
+  }
+
+  // Decides up front which pairs get a shortened gap and which start normal
+  // and squeeze shut as the bird nears. Called once per level.
+  PlanSpecialPairs(pacing, targetScore) {
+    // Roughly one pair per point, plus a little headroom for pairs skipped
+    // because they carry an enemy.
+    const span = targetScore + 3;
+    const picks = pickPairIndices(
+      pacing.narrowGaps + pacing.closingGaps,
+      pacing.firstRandom,
+      span,
+    );
+    const ascending = (a, b) => a - b;
+    this.narrowAt = picks.slice(0, pacing.narrowGaps).sort(ascending);
+    this.closingAt = picks.slice(pacing.narrowGaps).sort(ascending);
+    this.pairIndex = 0;
+  }
+
+  // Pairs marked closing start at a normal gap and tighten as the bird gets
+  // close, so the player has to react to the gap rather than read it from the
+  // far side of the screen.
+  UpdateClosingPairs() {
+    const from = this.startX + 340;
+    const to = this.startX;
+    for (let i = 0; i + 1 < this.obsList.length; i += 2) {
+      const top = this.obsList[i];
+      const bottom = this.obsList[i + 1];
+      if (!top.closing) {
+        continue;
+      }
+      const progress = Math.min(1, Math.max(0, (from - top.x) / (from - to)));
+      const shrink = (top.closing * progress) / 2;
+      top.height = top.baseHeight + shrink;
+      bottom.height = bottom.baseHeight + shrink;
+      bottom.y = this.mapHeight - bottom.height;
+    }
   }
 
   // Load this level's images and lay out the opening screen.
@@ -113,10 +163,14 @@ export class FlappyBird {
       this.obs.onload = function () {
         const h = 200; // height of the first hanging obstacle
         const h2 = this.mapHeight - h - this.obsDistance;
-        const obs1 = new Obstacle(this.mapWidth, 0, h, this.obs);
-        const obs2 = new Obstacle(this.mapWidth, this.mapHeight - h2, h2, this.obs);
+        const obs1 = new Obstacle(this.mapWidth, 0, h, this.obs, "down");
+        const obs2 = new Obstacle(this.mapWidth, this.mapHeight - h2, h2, this.obs, "up");
+        obs1.closing = 0;
+        obs1.baseHeight = h;
+        obs2.baseHeight = h2;
         this.obsList.push(obs1);
         this.obsList.push(obs2);
+        this.pairIndex = 0;
       }.bind(this);
     }
     this.obs.src = state.obsImgSrc;
@@ -135,12 +189,40 @@ export class FlappyBird {
 
   // Spawn the next obstacle pair, and an enemy every enemyIntervalCount pairs.
   CreateObs() {
-    const h = Math.floor(
-      Math.random() * (this.mapHeight - this.obsDistance - this.level) + 10,
+    this.pairIndex++;
+
+    // A pair that also carries an enemy is left alone: two hazards at once is
+    // not a step up in difficulty, it is a wall.
+    const carriesEnemy =
+      this.enemyLimitCount > 0 &&
+      this.enemyCount + 1 >= this.enemyIntervalCount;
+
+    let gap = this.obsDistance;
+    let closing = 0;
+    const trick = nextPairTrick(
+      this.pairIndex,
+      this.firstRandomPair,
+      carriesEnemy,
+      this.narrowAt,
+      this.closingAt,
     );
-    const h2 = this.mapHeight - h - this.obsDistance;
-    const obs1 = new Obstacle(this.mapWidth, 0, h, this.obs);
-    const obs2 = new Obstacle(this.mapWidth, this.mapHeight - h2, h2, this.obs);
+    if (trick === "narrow") {
+      this.narrowAt.shift();
+      gap -= this.narrowBy;
+    } else if (trick === "closing") {
+      this.closingAt.shift();
+      closing = this.narrowBy;
+    }
+
+    const h = Math.floor(
+      Math.random() * (this.mapHeight - gap - this.level) + 10,
+    );
+    const h2 = this.mapHeight - h - gap;
+    const obs1 = new Obstacle(this.mapWidth, 0, h, this.obs, "down");
+    const obs2 = new Obstacle(this.mapWidth, this.mapHeight - h2, h2, this.obs, "up");
+    obs1.closing = closing;
+    obs1.baseHeight = h;
+    obs2.baseHeight = h2;
     this.obsList.push(obs1);
     this.obsList.push(obs2);
     // Drop the pair that has left the screen.
@@ -172,8 +254,7 @@ export class FlappyBird {
   DrawObs(step) {
     for (let i = 0; i < this.obsList.length; i++) {
       this.obsList[i].x -= this.obsSpeed * step;
-      // The list alternates hanging, standing, hanging, standing.
-      this.obsList[i].draw(state.ctx, i % 2 ? "up" : "down");
+      this.obsList[i].draw(state.ctx);
     }
   }
 
@@ -221,7 +302,11 @@ export class FlappyBird {
     // The decision itself lives in rules.js, where it can be tested without a
     // canvas: it fires within a frame or two of a level starting, which is
     // far too fast to catch reliably by driving a browser.
-    if (!enemyInFiringLine(shot, this.enemyList, this.fireRange)) {
+    if (!enemyInFiringLine(
+        shot,
+        this.enemyList.map((enemy) => enemy.hitbox()),
+        this.fireRange,
+      )) {
       return;
     }
 
@@ -278,7 +363,7 @@ export class FlappyBird {
     const bullet = this.bulletList[0];
     if (this.spaceTouch && bullet != null) {
       const hit = this.enemyList.findIndex((enemy) =>
-        rectsOverlap(bullet, enemy),
+        rectsOverlap(bullet, enemy.hitbox()),
       );
       if (hit !== -1) {
         this.score += 1;
@@ -291,7 +376,10 @@ export class FlappyBird {
       } else if (
         // The shot has travelled past an enemy without connecting: retire it
         // so the player gets their next round back.
-        this.enemyList.some((enemy) => bullet.x >= enemy.x + enemy.width)
+        this.enemyList.some((enemy) => {
+        const box = enemy.hitbox();
+        return bullet.x >= box.x + box.width;
+      })
       ) {
         this.bulletList.splice(0, 1);
         this.spaceTouch = false;
@@ -312,20 +400,29 @@ export class FlappyBird {
   // there on why the four-corner version it replaces let the bird fly through
   // the middle of a cactus.
   CanMove() {
-    if (this.bird.y < 0 || this.bird.y > this.mapHeight - this.bird.height) {
+    const bird = this.bird.hitbox();
+
+    if (bird.y < 0 || bird.y + bird.height > this.mapHeight) {
       this.gameOver = true;
       return;
     }
 
     for (let w = 0; w < this.enemyList.length; w++) {
-      if (rectsOverlap(this.bird, this.enemyList[w])) {
+      if (rectsOverlap(bird, this.enemyList[w].hitbox())) {
         this.gameOver = true;
         return;
       }
     }
 
     for (let i = 0; i < this.obsList.length; i++) {
-      if (rectsOverlap(this.bird, this.obsList[i])) {
+      const obstacle = this.obsList[i];
+      const mask = obstacle.mask();
+      // Outline where the pixels are known, box until the sheet has loaded.
+      const hit =
+        mask == null
+          ? rectsOverlap(bird, obstacle)
+          : rectHitsMask(bird, mask);
+      if (hit) {
         this.gameOver = true;
         return;
       }
