@@ -141,35 +141,64 @@ function InitScript(stage) {
   Speed = stage.IntervalSpeed[0].ITVSpeed;
 }
 
+// The loop runs on requestAnimationFrame rather than a fixed setInterval, so
+// it draws at the display's refresh rate instead of a hard 33fps and stops
+// when the tab is hidden. Frame rate must not become game speed, so every
+// movement is scaled by `step`: the fraction of one original tick that this
+// frame actually covered. step === 1 reproduces the old cadence exactly.
 function RunGame(speed) {
-  const updateTimer = setInterval(function () {
+  let last = performance.now();
+  let sinceLastObs = 0;
+
+  const frame = function (now) {
+    // A backgrounded tab or a slow first paint can hand back a huge delta.
+    // Clamping stops the bird teleporting through an obstacle on the frame
+    // after the player switches back.
+    const elapsed = Math.min(now - last, 100);
+    last = now;
+    const step = elapsed / speed;
+
+    // CreateMap builds the bird and the first obstacle pair from image loads,
+    // so the first frame can arrive before either exists — CountScore reads
+    // obsList[0] unguarded. The old fixed 30ms tick usually gave the images
+    // just enough time to win the race; a rAF frame at ~16ms does not, and
+    // cactus.png is 130KB and not preloaded by the level-select screen.
+    if (!game.bird || game.obsList.length === 0) {
+      requestAnimationFrame(frame);
+      return;
+    }
+
     game.CanMove();
-    if (!game.gameOver) {
-      if (game.gameWin) {
-        sound.pause();
-        game.ShowWin();
-        clearInterval(updateTimer);
-        state.isPlay = false;
-        if (!state.curStage.IsCleared[0].flag) {
-          state.curStage.IsCleared[0].flag = true;
-          SaveLocal(state.curIndex, state.curStage.IsCleared[0].flag);
-        }
-        return false;
-      }
-    } else {
+    if (game.gameOver) {
       sound.pause();
       game.ShowOver();
-      clearInterval(updateTimer);
       state.isPlay = false;
-      return false;
+      return;
     }
+    if (game.gameWin) {
+      sound.pause();
+      game.ShowWin();
+      state.isPlay = false;
+      if (!state.curStage.IsCleared[0].flag) {
+        state.curStage.IsCleared[0].flag = true;
+        SaveLocal(state.curIndex, state.curStage.IsCleared[0].flag);
+      }
+      return;
+    }
+
+    sinceLastObs += elapsed;
+    if (sinceLastObs >= game.obsInterval) {
+      sinceLastObs -= game.obsInterval;
+      game.CreateObs();
+    }
+
     // Clear, then draw, then update.
     game.ClearScreen();
-    game.DrawObs();
+    game.DrawObs(step);
     if (game.enemyLimitCount >= 0) {
-      game.DrawEnemy();
+      game.DrawEnemy(step);
     }
-    game.CheckTouch();
+    game.CheckTouch(step);
     game.CountScore();
     game.ShowScore();
 
@@ -178,15 +207,11 @@ function RunGame(speed) {
     if (BLC != 0) {
       game.ShowBullet();
     }
-  }, speed);
 
-  const obsTimer = setInterval(function () {
-    if (game.gameOver || game.gameWin) {
-      clearInterval(obsTimer);
-      return;
-    }
-    game.CreateObs();
-  }, game.obsInterval);
+    requestAnimationFrame(frame);
+  };
+
+  requestAnimationFrame(frame);
 }
 
 // The canvas is displayed at whatever size fits the viewport, but every

@@ -157,29 +157,34 @@ FlappyBird.prototype = {
     }
   },
 
-  DrawObs: function () {
+  // `step` is how much of one original tick this frame covers; every speed
+  // below is per-tick, so multiplying keeps the game's pace independent of
+  // the refresh rate.
+  DrawObs: function (step) {
     for (let i = 0; i < this.obsList.length; i++) {
-      this.obsList[i].x -= this.obsSpeed;
+      this.obsList[i].x -= this.obsSpeed * step;
       // The list alternates hanging, standing, hanging, standing.
       this.obsList[i].draw(state.ctx, i % 2 ? "up" : "down");
     }
   },
 
-  DrawEnemy: function () {
+  DrawEnemy: function (step) {
     for (let i = 0; i < this.enemyList.length; i++) {
       if (!this.enemyList[i].defeat) {
-        this.enemyList[i].x -= this.obsSpeed;
-        // Bob up and down as it travels.
+        this.enemyList[i].x -= this.obsSpeed * step;
+        // Bob up and down as it travels. The offset is added per frame, so it
+        // scales with step like any other movement.
         this.enemyList[i].y =
-          this.enemyList[i].y + 4 * Math.sin((Math.PI / 15) * this.enemyList[i].x);
+          this.enemyList[i].y +
+          4 * Math.sin((Math.PI / 15) * this.enemyList[i].x) * step;
         this.enemyList[i].draw(state.ctx);
       }
     }
   },
 
-  DrawBullet: function () {
+  DrawBullet: function (step) {
     this.bulletList[0].draw(state.ctx);
-    this.bulletList[0].x += this.bulletSpeed;
+    this.bulletList[0].x += this.bulletSpeed * step;
     // Drop it once it leaves the screen, which frees the next shot.
     if (this.bulletList[0] != null && this.bulletList[0].x >= this.mapWidth) {
       this.bulletList.splice(0, 1);
@@ -311,16 +316,16 @@ FlappyBird.prototype = {
   },
 
   // Apply the pointer state to the bird and draw it.
-  CheckTouch: function () {
+  CheckTouch: function (step) {
     if (this.touch) {
-      this.bird.y -= this.upSpeed;
+      this.bird.y -= this.upSpeed * step;
       this.bird.draw(state.ctx, this.spaceTouch ? "attack" : "up");
     } else {
-      this.bird.y += this.downSpeed;
+      this.bird.y += this.downSpeed * step;
       this.bird.draw(state.ctx, this.spaceTouch ? "attack" : "down");
     }
     if (this.spaceTouch) {
-      this.DrawBullet();
+      this.DrawBullet(step);
     }
   },
 
