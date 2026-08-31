@@ -208,7 +208,8 @@ export const pressImgs = Array.from({ length: 4 }, (_, i) => {
 
 // Centred on the 800x600 buffer, over the bird's own resting spot: the
 // prompt and the thing it is telling you to move sit in the same place.
-export const PRESS_RECT = { x: 320, y: 220, width: 160, height: 160 };
+// 1.5x the original 160x160 so it reads clearly at a glance.
+export const PRESS_RECT = { x: 280, y: 180, width: 240, height: 240 };
 
 // ~150ms a frame over four frames is one clean cycle rather than a flicker.
 function pressFrame(timestamp) {
