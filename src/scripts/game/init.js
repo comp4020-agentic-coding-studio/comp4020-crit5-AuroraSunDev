@@ -8,6 +8,7 @@ import {
   CHOICE_HOME_RECT,
   CHOICE_PLAY_RECT,
   drawPlayButton,
+  drawPressPrompt,
   font,
   hits,
   HOME_PLAY_RECT,
@@ -81,6 +82,10 @@ let Speed; // ms between frames, per level
 // screen, and the end of an endless run. Null the rest of the time, so the
 // single-button end screens keep hit-testing against their own rect.
 let choiceScreen = null;
+// True from the moment Level 1 is chosen until the first tap: the level's
+// world is loaded and on screen, but CreateObs/RunGame have not started, so
+// nothing can fall out of the sky before the player has done anything.
+let awaitingClickToStart = false;
 
 export function initGame(canvas) {
   setCanvas(canvas);
@@ -170,6 +175,13 @@ function PointerUp() {
 // The one place a tap is acted on, shared by mouse click and touchend so the
 // two input paths can never drift apart.
 function HandlePrimaryTap() {
+  // The tap that ends the Level 1 prompt: it can land anywhere on the
+  // canvas, unlike every other tap here, which is checked against a rect.
+  if (awaitingClickToStart) {
+    awaitingClickToStart = false;
+    BeginRunning();
+    return;
+  }
   if (!state.isSelect && state.isHome) {
     HomeClick();
   }
@@ -408,23 +420,58 @@ function Select() {
       state.ctx.clearRect(0, 0, state.canvas.width, state.canvas.height);
       if (!state.isPlay) {
         state.isPlay = true;
-
         game.CreateMap();
-        RunGame(Speed);
-
-        sound.addEventListener(
-          "ended",
-          function () {
-            this.currentTime = 0;
-            this.play();
-          },
-          false,
-        );
-        sound.play();
+        // Level 1 is the one a stranger reaches with nothing behind them:
+        // every other level is chosen by someone who has already survived
+        // this one. Hold it on its opening frame until the first tap rather
+        // than let gravity start working on a bird nobody has touched yet.
+        if (i + 1 === 1) {
+          awaitingClickToStart = true;
+          RunAwaitingStart();
+        } else {
+          BeginRunning();
+        }
       }
       break;
     }
   }
+}
+
+// Starts the obstacle clock and the frame loop for real, and the music with
+// it. Shared by every level's ordinary start and by the tap that ends
+// Level 1's prompt.
+function BeginRunning() {
+  RunGame(Speed);
+  sound.addEventListener(
+    "ended",
+    function () {
+      this.currentTime = 0;
+      this.play();
+    },
+    false,
+  );
+  sound.play();
+}
+
+// Draws the level's own background and its bird, resting, under a dim
+// click-and-mouse icon — nothing moves and nothing can end the run — until
+// awaitingClickToStart is cleared by the first tap.
+function RunAwaitingStart() {
+  const frame = function (timestamp) {
+    if (!awaitingClickToStart) {
+      return;
+    }
+    // CreateMap's bird image load can still be in flight on the first frame.
+    if (!game.bird) {
+      requestAnimationFrame(frame);
+      return;
+    }
+    game.ClearScreen();
+    game.bird.draw(state.ctx, "down");
+    drawPressPrompt(state.ctx, timestamp);
+    requestAnimationFrame(frame);
+  };
+  requestAnimationFrame(frame);
 }
 
 function DrawBG_Title() {

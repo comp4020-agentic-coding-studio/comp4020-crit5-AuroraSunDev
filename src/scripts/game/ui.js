@@ -195,6 +195,35 @@ export function breathe(timestamp) {
   return 1 + 0.04 * Math.sin(timestamp / 270);
 }
 
+// Level 1 drops a first-time player straight into gravity with no warning:
+// CanMove() can end the run before anyone has worked out what a click does.
+// This is what the level waits on before it starts — a click-and-mouse icon
+// cycling through its own four frames, which asks for a tap the way an
+// emoji does rather than the way a sentence does.
+export const pressImgs = Array.from({ length: 4 }, (_, i) => {
+  const img = new Image();
+  img.src = asset(`img/ui/press${i + 1}.png`);
+  return img;
+});
+
+// Centred on the 800x600 buffer, over the bird's own resting spot: the
+// prompt and the thing it is telling you to move sit in the same place.
+export const PRESS_RECT = { x: 320, y: 220, width: 160, height: 160 };
+
+// ~150ms a frame over four frames is one clean cycle rather than a flicker.
+function pressFrame(timestamp) {
+  return Math.floor(timestamp / 150) % pressImgs.length;
+}
+
+export function drawPressPrompt(ctx, timestamp) {
+  ctx.save();
+  ctx.fillStyle = "rgba(20,10,5,0.35)";
+  ctx.fillRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  ctx.drawImage(pressImgs[pressFrame(timestamp)],
+    PRESS_RECT.x, PRESS_RECT.y, PRESS_RECT.width, PRESS_RECT.height);
+  ctx.restore();
+}
+
 // The score digits, 0-9. A number climbing at the top of the screen needs no
 // caption in any language, which suits a game that is not allowed to explain
 // itself.
